@@ -1,9 +1,20 @@
 import re
-import fitz  # PyMuPDF
+iMIN_TOUSE_TIKTOKEN = False  # set True if tiktoken is installed for accurate token counting
+TAB_WIDTH = 4         # 1 tab = 4 spaces when calculating indent
+INDENT_STEP = 4       # indent difference threshold (>=) to consider as new "block"S = 300
+MAX_TOKENS = 500
+USE_TIKTOKEN = False  # set True if tiktoken is installed for accurate token counting
+TAB_WIDTH = 4         # 1 tab = 4 spaces when calculating indent
+INDENT_STEP = 4       # indent difference threshold (>=) to consider as new "block" fitz  # PyMuPDF
 import os
 from typing import List, Dict, Tuple, Optional
 
-# ===================== Cấu hình =====================
+# ===================== Configuration =====================
+MIN_TOKENS = 300
+MAX_TOKENS = 500
+USE_TIKTOKEN = False  # set True if tiktoken is installed for accurate token counting
+TAB_WIDTH = 4         # 1 tab = 4 spaces when calculating indent
+INDENT_STEP = 4       # indent difference threshold (>=) to consider as new "block"
 MIN_TOKENS = 300
 MAX_TOKENS = 500
 USE_TIKTOKEN = False  # đặt True nếu đã cài tiktoken để đếm token sát mô hình
@@ -86,12 +97,12 @@ def _is_toc_page(page_text: str) -> bool:
         
     return False
 
-# ===================== PDF -> text (giữ line breaks) =====================
+# ===================== PDF -> text (preserve line breaks) =====================
 def _pdf_to_text_with_lines(pdf_path: str) -> Tuple[str, List[Tuple[int,int]]]:
     """
-    Trả về:
-    - doc_text: toàn văn, nối các trang bằng '\n\n' (đã loại bỏ TOC pages)
-    - page_spans: danh sách (start_char_idx, end_char_idx) cho từng trang trong doc_text
+    Returns:
+    - doc_text: full document text, pages joined with '\n\n' (TOC pages already filtered out)
+    - page_spans: list of (start_char_idx, end_char_idx) for each page in doc_text
     """
     doc = fitz.open(pdf_path)
     pieces = []
@@ -101,7 +112,7 @@ def _pdf_to_text_with_lines(pdf_path: str) -> Tuple[str, List[Tuple[int,int]]]:
     
     for pno in range(len(doc)):
         page = doc[pno]
-        # lấy theo blocks để giữ thứ tự đọc gần đúng + giữ \n giữa lines trong block
+        # get blocks to maintain proper reading order + preserve \n between lines in block
         blocks = page.get_text("blocks")
         blocks = sorted(blocks, key=lambda b: (round(b[1],1), round(b[0],1)))
         page_text = "\n".join(
@@ -117,7 +128,7 @@ def _pdf_to_text_with_lines(pdf_path: str) -> Tuple[str, List[Tuple[int,int]]]:
         start = cursor
         pieces.append(page_text)
         cursor += len(page_text) + 2
-        spans.append((start, cursor))  # cursor hiện đang ở sau '\n\n' chèn giữa trang
+        spans.append((start, cursor))  # cursor is now after the '\n\n' inserted between pages
     
     if toc_pages_found > 0:
         print(f"Filtered out {toc_pages_found} TOC pages from {len(doc)} total pages")
@@ -221,22 +232,22 @@ def _build_breadcrumbs(headings: List[Dict], current_block_index: int) -> List[s
     
     return breadcrumbs
 
-# ===================== Dòng -> indent =====================
+# ===================== Line -> indent =====================
 _WS_ONLY = re.compile(r"^\s*$")
 
 def _indent_width(line: str) -> int:
-    # tính indent theo số spaces (tab => TAB_WIDTH spaces)
+    # calculate indent in number of spaces (tab => TAB_WIDTH spaces)
     leading = len(line) - len(line.lstrip("\t "))
-    # quy đổi tab và space: đơn giản, thay tab bằng TAB_WIDTH spaces rồi đếm
+    # convert tabs and spaces: simple approach, replace tabs with TAB_WIDTH spaces then count
     expanded = line[:leading].replace("\t", " " * TAB_WIDTH)
     return len(expanded)
 
-# ===================== Gom thành blocks theo indent & dòng trống =====================
+# ===================== Group into blocks by indent & blank lines =====================
 def _lines_to_blocks(text: str) -> List[Dict]:
     """
-    Biến chuỗi văn bản có line breaks thành danh sách blocks:
-    - ranh giới block: dòng trống hoặc thay đổi indent >= INDENT_STEP
-    - Mỗi block: {"indent": int, "text": str}
+    Convert text string with line breaks into list of blocks:
+    - block boundary: blank line or indent change >= INDENT_STEP
+    - Each block: {"indent": int, "text": str}
     """
     raw_lines = text.splitlines()
     blocks = []
@@ -246,14 +257,14 @@ def _lines_to_blocks(text: str) -> List[Dict]:
     def flush():
         nonlocal buf, cur_indent
         if buf:
-            # ghép giữ nguyên xuống dòng nội bộ block
+            # join preserving internal line breaks within block
             blk_text = "\n".join(buf).strip("\n")
             blocks.append({"indent": cur_indent or 0, "text": blk_text})
             buf = []
 
     for ln in raw_lines:
         if _WS_ONLY.match(ln):
-            # dòng trống => kết thúc block hiện tại
+            # blank line => end current block
             flush()
             cur_indent = None
             continue
@@ -261,11 +272,11 @@ def _lines_to_blocks(text: str) -> List[Dict]:
         ind = _indent_width(ln)
 
         if cur_indent is None:
-            # mở block mới
+            # start new block
             cur_indent = ind
             buf = [ln]
         else:
-            # nếu đổi indent mạnh (>= INDENT_STEP) -> kết thúc block trước, mở block mới
+            # if strong indent change (>= INDENT_STEP) -> end previous block, start new block
             if abs(ind - cur_indent) >= INDENT_STEP:
                 flush()
                 cur_indent = ind
@@ -276,15 +287,15 @@ def _lines_to_blocks(text: str) -> List[Dict]:
     flush()
     return blocks
 
-# ===================== Cắt block lớn theo câu =====================
+# ===================== Split large blocks by sentences =====================
 _BULLET_PAT = re.compile(r"^\s*([\-•\*]|\d+[\.\)])\s+")
 _SENT_SPLIT = re.compile(r"(?<=[\.\?\!…])\s+")
 
 def _split_block_into_chunks_by_sentence(blk_text: str, min_tokens=MIN_TOKENS, max_tokens=MAX_TOKENS) -> List[str]:
     """
-    Nếu block quá lớn, cắt theo câu (không xé bullet).
+    If block is too large, split by sentences (don't break bullet points).
     """
-    # giữ nguyên line breaks khi có bullet: coi mỗi bullet-line là 1 đơn vị
+    # preserve line breaks when there are bullets: treat each bullet-line as one unit
     parts: List[str] = []
     for line in blk_text.splitlines():
         line = line.rstrip()
@@ -293,7 +304,7 @@ def _split_block_into_chunks_by_sentence(blk_text: str, min_tokens=MIN_TOKENS, m
         if _BULLET_PAT.match(line):
             parts.append(line)
         else:
-            # tách thêm theo câu cho dòng thường
+            # additionally split by sentences for regular lines
             segs = _SENT_SPLIT.split(line)
             for s in segs:
                 s = s.strip()
@@ -306,7 +317,7 @@ def _split_block_into_chunks_by_sentence(blk_text: str, min_tokens=MIN_TOKENS, m
     for p in parts:
         t = _tok_count(p)
         if t > max_tokens:
-            # một câu/bullet quá dài: đẩy riêng
+            # one sentence/bullet too long: push separately
             if cur:
                 if cur_tok >= min_tokens:
                     chunks.append("\n".join(cur))
@@ -331,7 +342,7 @@ def _split_block_into_chunks_by_sentence(blk_text: str, min_tokens=MIN_TOKENS, m
         else:
             chunks.append("\n".join(cur))
 
-    # nếu cuối cùng còn < min -> nhập ngược nếu được
+    # if the last chunk is still < min -> merge backward if possible
     if len(chunks) >= 2 and _tok_count(chunks[-1]) < min_tokens:
         if _tok_count(chunks[-2]) + _tok_count(chunks[-1]) <= max_tokens:
             chunks[-2] = (chunks[-2] + "\n" + chunks[-1]).strip("\n")
@@ -339,12 +350,12 @@ def _split_block_into_chunks_by_sentence(blk_text: str, min_tokens=MIN_TOKENS, m
 
     return chunks
 
-# ===================== Pack blocks vào chunks ~500 =====================
+# ===================== Pack blocks into ~500 token chunks =====================
 def _pack_blocks_into_chunks(blocks: List[Dict], headings: List[Dict], min_tokens=MIN_TOKENS, max_tokens=MAX_TOKENS) -> List[Dict]:
     """
-    Gộp các block (theo thứ tự) vào chunk ~500 tokens, nằm trong [300, 500] khi có thể.
-    - Block quá lớn -> cắt theo câu (không cắt bullet).
-    - Không dùng heading; chỉ dựa indent & dòng trống để xác định block tự nhiên.
+    Group blocks (in order) into ~500 token chunks, within [300, 500] when possible.
+    - Oversized block -> split by sentences (don't break bullets).
+    - Don't use headings; only rely on indent & blank lines to determine natural blocks.
     """
     out: List[Dict] = []
     cur_parts: List[str] = []
@@ -376,7 +387,7 @@ def _pack_blocks_into_chunks(blocks: List[Dict], headings: List[Dict], min_token
         ind = blk["indent"]
         t = _tok_count(txt)
 
-        # nếu block quá lớn -> cắt nhỏ bên trong block
+        # if block is too large -> split into smaller pieces within block
         if t > max_tokens:
             subchunks = _split_block_into_chunks_by_sentence(txt, min_tokens, max_tokens)
             for sc in subchunks:
@@ -400,18 +411,18 @@ def _pack_blocks_into_chunks(blocks: List[Dict], headings: List[Dict], min_token
                         close()
             continue
 
-        # block kích thước thường: thử nhét vào chunk hiện tại
+        # regular sized block: try to fit into current chunk
         if cur_tok + t <= max_tokens:
             cur_parts.append(txt)
             cur_inds.append(ind)
             cur_block_indices.append(block_idx)
             cur_tok += t
-            # đạt "đẹp" trong [min,max] -> chưa đóng vội, trừ khi block tiếp theo sẽ làm vượt
-            # (không có nhìn trước ở đây để giữ đơn giản; chunk sẽ đóng khi thêm block kế vượt max)
+            # reached "nice" range [min,max] -> don't rush to close, unless next block would exceed
+            # (no lookahead here to keep simple; chunk will close when adding next block exceeds max)
         else:
-            # đóng chunk hiện tại nếu thêm sẽ vượt max
+            # close current chunk if adding would exceed max
             close()
-            # đổ block vào chunk mới
+            # put block into new chunk
             cur_parts.append(txt)
             cur_inds.append(ind)
             cur_block_indices.append(block_idx)
@@ -422,7 +433,7 @@ def _pack_blocks_into_chunks(blocks: List[Dict], headings: List[Dict], min_token
     close()
     return out
 
-# ===================== Ước lượng page range =====================
+# ===================== Estimate page range =====================
 def _estimate_page_range(payload: str, doc_text: str, page_spans: List[Tuple[int, int]]) -> str:
     try:
         start_idx = doc_text.find(payload[:200])
@@ -447,18 +458,19 @@ def _estimate_page_range(payload: str, doc_text: str, page_spans: List[Tuple[int
     except Exception:
         return "Unknown"
 
-# ===================== API chính =====================
+# ===================== Main API =====================
 def pdf_to_chunks_smart_indent(
     pdf_path: str,
     min_tokens: int = MIN_TOKENS,
     max_tokens: int = MAX_TOKENS
 ) -> List[Dict]:
     """
-    - Đọc PDF -> text (giữ line breaks)
-    - Chia thành blocks theo "dòng trống" + "đổi indent >= INDENT_STEP"
-    - Pack blocks vào chunk ~500 tokens (trong [300, 500] nếu có thể)
-    - Tự động phát hiện tiêu đề và tạo breadcrumbs
-    - Prepend ngữ cảnh tiêu đề vào chunk content
+    - Read PDF -> text (preserve line breaks)  
+    - Divide into blocks by "blank lines" + "indent change >= INDENT_STEP"  
+    - Pack blocks into ~500 token chunks (within [300, 500] if possible)  
+    - Automatically detect headings and create breadcrumbs  
+    - Prepend heading context to the chunk content  
+
     """
     file_name = os.path.basename(pdf_path)
     doc_text, page_spans = _pdf_to_text_with_lines(pdf_path)
