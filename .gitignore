@@ -151,7 +151,7 @@ Thumbs.db
 chroma_data/
 *.pdf
 *.docx
-*.txt
+
 *.md
 temp/
 output/

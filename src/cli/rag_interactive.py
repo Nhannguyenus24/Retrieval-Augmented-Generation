@@ -31,6 +31,7 @@ try:
     from ingestion.transform_pdf import pdf_to_chunks_smart_indent
     from chunking.store_chunks import ChromaChunkStore
     from retriever.search_chunks import ChromaChunkSearcher
+    from llm.provider.gemini import one_shot
 except ImportError as e:
     print(f"Import error: {e}")
     print("Make sure you're running from the project root directory")
@@ -112,7 +113,9 @@ class RAGInteractiveCLI:
             'top_k': DEFAULT_TOP_K,
             'min_similarity': 0.0,
             'show_content': True,
-            'max_content_length': 500
+            'max_content_length': 500,
+            'use_gemini': True,
+            'show_raw_chunks': False
         }
     
     def _init_store(self):
@@ -185,6 +188,45 @@ class RAGInteractiveCLI:
         """Print a separator line"""
         print(f"{color}{char * width}{Colors.RESET}")
     
+    def _print_gemini_response(self, response: str, query: str):
+        """Print Gemini AI response with beautiful formatting"""
+        print(f"\n{Colors.BRIGHT_MAGENTA}🤖 AI RESPONSE{Colors.RESET}")
+        self._print_separator("═", width=100, color=Colors.BRIGHT_MAGENTA)
+        
+        print(f"{Colors.BRIGHT_CYAN}Query:{Colors.RESET} {Colors.BOLD}{query}{Colors.RESET}")
+        print(f"\n{Colors.BRIGHT_YELLOW}Answer:{Colors.RESET}")
+        
+        # Format the response with proper indentation
+        for line in response.split('\n'):
+            if line.strip():
+                print(f"  {line}")
+            else:
+                print()
+        
+        self._print_separator("═", width=100, color=Colors.BRIGHT_MAGENTA)
+    
+    def _get_gemini_response(self, results: list, query: str) -> str:
+        """Get AI response from Gemini using search results"""
+        try:
+            if not results:
+                return "No search results available to generate response."
+            
+            # Format results for Gemini
+            formatted_results = []
+            for result in results:
+                formatted_result = {
+                    'file_name': result['file_name'],
+                    'page_range': result['page_range'],
+                    'similarity': result['similarity'],
+                    'content': result['content']
+                }
+                formatted_results.append(formatted_result)
+            
+            response = one_shot(str(formatted_results), query)
+            return response
+        except Exception as e:
+            return f"Error generating AI response: {e}"
+    
     def _print_menu_item(self, number: str, icon: str, title: str, description: str):
         """Print a formatted menu item"""
         print(f"  {Colors.BRIGHT_CYAN}[{number}]{Colors.RESET} {icon} {Colors.BOLD}{title}{Colors.RESET}")
@@ -254,7 +296,8 @@ class RAGInteractiveCLI:
         self._print_separator()
         
         # Show current settings
-        print(f"{Colors.DIM}Current Settings: min_tokens={self.settings['min_tokens']}, max_tokens={self.settings['max_tokens']}, top_k={self.settings['top_k']}{Colors.RESET}")
+        gemini_status = "ON" if self.settings['use_gemini'] else "OFF"
+        print(f"{Colors.DIM}Current Settings: min_tokens={self.settings['min_tokens']}, max_tokens={self.settings['max_tokens']}, top_k={self.settings['top_k']}, Gemini AI: {gemini_status}{Colors.RESET}")
 
     def chunk_pdf_interactive(self):
         """Interactive PDF chunking"""
@@ -397,7 +440,8 @@ class RAGInteractiveCLI:
         min_similarity = input(f"Minimum similarity (0.0-1.0) [{self.settings['min_similarity']}]: ").strip()
         min_similarity = float(min_similarity) if min_similarity else self.settings['min_similarity']
         
-        show_content = input(f"Show chunk content? (Y/n): ").strip().lower() != 'n'
+        show_raw_chunks = input(f"Show raw chunks? (y/N): ").strip().lower() == 'y'
+        show_content = show_raw_chunks  # For compatibility
         
         print(f"\n{Colors.BRIGHT_BLUE}Searching for: '{query}'...{Colors.RESET}")
         
@@ -408,26 +452,39 @@ class RAGInteractiveCLI:
                 self._print_warning("No matching chunks found")
                 return
             
-            # Display enhanced results
-            self._print_success(f"Found {len(results)} matching chunks")
-            self._print_separator(width=100)
+            # Get AI response first if enabled
+            if self.settings['use_gemini']:
+                print(f"\n{Colors.BRIGHT_BLUE}Generating AI response...{Colors.RESET}")
+                ai_response = self._get_gemini_response(results, query)
+                self._print_gemini_response(ai_response, query)
             
-            for result in results:
-                print(f"\n{Colors.BRIGHT_CYAN}#{result['rank']} - {result['file_name']} (Chunk {result['chunk_id']}){Colors.RESET}")
-                print(f"   {Symbols.DIAMOND} Page: {result['page_range']} | Similarity: {Colors.BRIGHT_GREEN}{result['similarity']:.4f}{Colors.RESET} | Tokens: {result['token_count']}")
-                print(f"   {Symbols.DIAMOND} ID: {Colors.DIM}{result['id']}{Colors.RESET}")
+            # Display enhanced results if requested
+            if self.settings['show_raw_chunks']:
+                self._print_success(f"Found {len(results)} matching chunks")
+                self._print_separator(width=100)
                 
-                if result.get('indent_levels'):
-                    print(f"   {Symbols.DIAMOND} Structure levels: {result['indent_levels']}")
-                
-                if show_content:
-                    print(f"\n   {Colors.YELLOW}Content:{Colors.RESET}")
-                    # Format content with proper indentation
-                    for line in result['content'].split('\n'):
-                        if line.strip():
-                            print(f"   {Colors.DIM}│{Colors.RESET} {line}")
-                
-                self._print_separator("─", width=100, color=Colors.DIM)
+                for result in results:
+                    print(f"\n{Colors.BRIGHT_CYAN}#{result['rank']} - {result['file_name']} (Chunk {result['chunk_id']}){Colors.RESET}")
+                    print(f"   {Symbols.DIAMOND} Page: {result['page_range']} | Similarity: {Colors.BRIGHT_GREEN}{result['similarity']:.4f}{Colors.RESET} | Tokens: {result['token_count']}")
+                    print(f"   {Symbols.DIAMOND} ID: {Colors.DIM}{result['id']}{Colors.RESET}")
+                    
+                    if result.get('indent_levels'):
+                        print(f"   {Symbols.DIAMOND} Structure levels: {result['indent_levels']}")
+                    
+                    if show_content:
+                        print(f"\n   {Colors.YELLOW}Content:{Colors.RESET}")
+                        # Format content with proper indentation
+                        for line in result['content'].split('\n'):
+                            if line.strip():
+                                print(f"   {Colors.DIM}│{Colors.RESET} {line}")
+                    
+                    self._print_separator("─", width=100, color=Colors.DIM)
+            elif not self.settings['use_gemini']:
+                # Show basic results if Gemini is disabled
+                self._print_success(f"Found {len(results)} matching chunks")
+                for result in results:
+                    print(f"\n{Colors.BRIGHT_CYAN}#{result['rank']} - {result['file_name']} (Chunk {result['chunk_id']}){Colors.RESET}")
+                    print(f"   {Symbols.DIAMOND} Page: {result['page_range']} | Similarity: {Colors.BRIGHT_GREEN}{result['similarity']:.4f}{Colors.RESET}")
         
         except Exception as e:
             self._print_error(f"Search error: {e}")
@@ -444,6 +501,8 @@ class RAGInteractiveCLI:
         print(f"  {Symbols.BULLET} Enter any question to search")
         print(f"  {Symbols.BULLET} 'config' - Change search settings")
         print(f"  {Symbols.BULLET} 'stats' - Show collection statistics")
+        print(f"  {Symbols.BULLET} 'gemini' - Toggle AI response on/off")
+        print(f"  {Symbols.BULLET} 'chunks' - Toggle raw chunks display")
         print(f"  {Symbols.BULLET} 'back' - Return to main menu")
         print(f"  {Symbols.BULLET} 'quit' - Exit application")
         
@@ -451,7 +510,9 @@ class RAGInteractiveCLI:
         
         while True:
             try:
-                print(f"\n{Colors.DIM}Settings: top-k={self.settings['top_k']}, min_similarity={self.settings['min_similarity']:.2f}{Colors.RESET}")
+                gemini_status = "ON" if self.settings['use_gemini'] else "OFF"
+                chunks_status = "ON" if self.settings['show_raw_chunks'] else "OFF"
+                print(f"\n{Colors.DIM}Settings: top-k={self.settings['top_k']}, similarity={self.settings['min_similarity']:.2f}, AI={gemini_status}, Chunks={chunks_status}{Colors.RESET}")
                 query = input(f"{Colors.BRIGHT_CYAN}Search{Colors.RESET} {Symbols.ARROW_RIGHT} ").strip()
                 
                 if not query:
@@ -468,6 +529,16 @@ class RAGInteractiveCLI:
                 elif query.lower() == 'config':
                     self.configure_search_settings()
                     continue
+                elif query.lower() == 'gemini':
+                    self.settings['use_gemini'] = not self.settings['use_gemini']
+                    status = "enabled" if self.settings['use_gemini'] else "disabled"
+                    self._print_success(f"AI response {status}")
+                    continue
+                elif query.lower() == 'chunks':
+                    self.settings['show_raw_chunks'] = not self.settings['show_raw_chunks']
+                    status = "enabled" if self.settings['show_raw_chunks'] else "disabled"
+                    self._print_success(f"Raw chunks display {status}")
+                    continue
                 
                 # Perform search
                 print(f"{Colors.BRIGHT_BLUE}Searching...{Colors.RESET}")
@@ -481,23 +552,35 @@ class RAGInteractiveCLI:
                     self._print_warning("No matching chunks found")
                     continue
                 
-                # Display compact results
-                print(f"\n{Colors.BRIGHT_GREEN}Found {len(results)} results:{Colors.RESET}")
+                # Get AI response if enabled
+                if self.settings['use_gemini']:
+                    ai_response = self._get_gemini_response(results, query)
+                    self._print_gemini_response(ai_response, query)
                 
-                for result in results:
-                    print(f"\n{Colors.CYAN}#{result['rank']}{Colors.RESET} {Colors.BOLD}{result['file_name']}{Colors.RESET} (p.{result['page_range']}) - {Colors.BRIGHT_GREEN}{result['similarity']:.3f}{Colors.RESET}")
+                # Display compact results if raw chunks are enabled
+                if self.settings['show_raw_chunks']:
+                    print(f"\n{Colors.BRIGHT_GREEN}Found {len(results)} results:{Colors.RESET}")
                     
-                    if self.settings['show_content']:
-                        # Show truncated content
-                        content = result['content']
-                        if len(content) > self.settings['max_content_length']:
-                            content = content[:self.settings['max_content_length']] + "..."
+                    for result in results:
+                        print(f"\n{Colors.CYAN}#{result['rank']}{Colors.RESET} {Colors.BOLD}{result['file_name']}{Colors.RESET} (p.{result['page_range']}) - {Colors.BRIGHT_GREEN}{result['similarity']:.3f}{Colors.RESET}")
                         
-                        for line in content.split('\n')[:3]:  # Show first 3 lines
-                            if line.strip():
-                                print(f"    {Colors.DIM}{line}{Colors.RESET}")
-                        if len(result['content'].split('\n')) > 3:
-                            print(f"    {Colors.DIM}... (truncated){Colors.RESET}")
+                        if self.settings['show_content']:
+                            # Show truncated content
+                            content = result['content']
+                            if len(content) > self.settings['max_content_length']:
+                                content = content[:self.settings['max_content_length']] + "..."
+                            
+                            for line in content.split('\n')[:3]:  # Show first 3 lines
+                                if line.strip():
+                                    print(f"    {Colors.DIM}{line}{Colors.RESET}")
+                            if len(result['content'].split('\n')) > 3:
+                                print(f"    {Colors.DIM}... (truncated){Colors.RESET}")
+                elif not self.settings['use_gemini']:
+                    # Show basic summary if Gemini is disabled
+                    print(f"\n{Colors.BRIGHT_GREEN}Found {len(results)} matching chunks from:{Colors.RESET}")
+                    files = list(set([r['file_name'] for r in results]))
+                    for file in files:
+                        print(f"  {Colors.CYAN}• {file}{Colors.RESET}")
                 
             except KeyboardInterrupt:
                 print(f"\n{Colors.YELLOW}Returning to main menu...{Colors.RESET}")
@@ -549,6 +632,8 @@ class RAGInteractiveCLI:
         print(f"  {Symbols.GEAR} Max tokens per chunk: {self.settings['max_tokens']}")
         print(f"  {Symbols.GEAR} Search results (top-k): {self.settings['top_k']}")
         print(f"  {Symbols.GEAR} Minimum similarity: {self.settings['min_similarity']:.2f}")
+        print(f"  {Symbols.GEAR} Use Gemini AI: {'Yes' if self.settings['use_gemini'] else 'No'}")
+        print(f"  {Symbols.GEAR} Show raw chunks: {'Yes' if self.settings['show_raw_chunks'] else 'No'}")
         print(f"  {Symbols.GEAR} Show content: {'Yes' if self.settings['show_content'] else 'No'}")
         print(f"  {Symbols.GEAR} Max content length: {self.settings['max_content_length']}")
         
@@ -572,6 +657,19 @@ class RAGInteractiveCLI:
             new_sim = input(f"Minimum similarity (0.0-1.0) [{self.settings['min_similarity']:.2f}]: ").strip()
             if new_sim:
                 self.settings['min_similarity'] = max(0.0, min(float(new_sim), 1.0))
+            
+            # AI settings
+            use_gemini = input(f"Use Gemini AI ({'Y' if self.settings['use_gemini'] else 'N'}): ").strip().lower()
+            if use_gemini in ['y', 'yes', 'true']:
+                self.settings['use_gemini'] = True
+            elif use_gemini in ['n', 'no', 'false']:
+                self.settings['use_gemini'] = False
+            
+            show_raw_chunks = input(f"Show raw chunks ({'Y' if self.settings['show_raw_chunks'] else 'N'}): ").strip().lower()
+            if show_raw_chunks in ['y', 'yes', 'true']:
+                self.settings['show_raw_chunks'] = True
+            elif show_raw_chunks in ['n', 'no', 'false']:
+                self.settings['show_raw_chunks'] = False
             
             # Display settings
             show_content = input(f"Show content ({'Y' if self.settings['show_content'] else 'N'}): ").strip().lower()

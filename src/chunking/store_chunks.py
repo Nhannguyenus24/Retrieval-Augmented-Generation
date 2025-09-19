@@ -103,12 +103,17 @@ class ChromaChunkStore:
                 
                 # Chunk content
                 documents.append(chunk['content'])
+
+                page_from = str(chunk.get('page_from', 'Unknown'))
+                page_to   = str(chunk.get('page_to', 'Unknown'))
+                page_range = page_from if page_from == page_to else f"{page_from}-{page_to}"
+
                 
                 # Enhanced metadata with breadcrumbs and new fields
                 metadata = {
                     "file_name": chunk['file_name'],
                     "chunk_id": chunk['chunk_id'],
-                    "page_range": chunk['page_range'],
+                    "page_range": page_range,
                     "indent_levels": json.dumps(chunk['indent_levels']),
                     "token_count": chunk['token_est'],
                     "source_path": os.path.abspath(pdf_path),

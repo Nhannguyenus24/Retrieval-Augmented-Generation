@@ -3,21 +3,22 @@
 Script to search chunks in a ChromaDB vector database.
 Takes input from console and returns the top-k most similar chunks.
 """
-
 import os
 import sys
 import json
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from typing import List, Dict, Optional, Tuple
 os.environ["ANONYMIZED_TELEMETRY"] = "FALSE"
 import chromadb
 from chromadb.config import Settings
-
+from llm.provider.gemini import *
 # ===================== Configuration =====================
 CHROMA_HOST = "localhost"
 CHROMA_PORT = 8000
 COLLECTION_NAME = "pdf_chunk"
-DEFAULT_TOP_K = 5
-MAX_TOP_K = 20
+DEFAULT_TOP_K = 50
+MAX_TOP_K = 100
 
 class ChromaChunkSearcher:
     def __init__(self, host: str = CHROMA_HOST, port: int = CHROMA_PORT, collection_name: str = COLLECTION_NAME):
@@ -102,7 +103,12 @@ class ChromaChunkSearcher:
                     indent_levels = json.loads(metadata.get('indent_levels', '[]'))
                 except:
                     indent_levels = []
-                
+
+                page_from = str(metadata.get('page_from', 'Unknown'))
+                page_to   = str(metadata.get('page_to', 'Unknown'))
+                page_range = page_from if page_from == page_to else f"{page_from}-{page_to}"
+
+
                 result = {
                     'rank': i + 1,
                     'id': doc_id,
@@ -110,7 +116,7 @@ class ChromaChunkSearcher:
                     'distance': round(distance, 4),
                     'file_name': metadata.get('file_name', 'Unknown'),
                     'chunk_id': metadata.get('chunk_id', -1),
-                    'page_range': metadata.get('page_range', 'Unknown'),
+                    'page_range': page_range,
                     'token_count': metadata.get('token_count', 0),
                     'indent_levels': indent_levels,
                     'content': doc,
@@ -261,7 +267,8 @@ class ChromaChunkSearcher:
                 
                 # Execute search
                 results = self.search_chunks(query, top_k=current_top_k, min_similarity=current_min_similarity)
-                self.print_search_results(results, show_content=show_content, max_content_length=max_content_length)
+                print(one_shot(str(results), query))
+                # self.print_search_results(results, show_content=show_content, max_content_length=max_content_length)
                 
             except KeyboardInterrupt:
                 print("\nGoodbye!")

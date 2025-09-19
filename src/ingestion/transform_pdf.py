@@ -98,17 +98,14 @@ def _is_toc_page(page_text: str) -> bool:
     return False
 
 # ===================== PDF -> text (preserve line breaks) =====================
-def _pdf_to_text_with_lines(pdf_path: str) -> Tuple[str, List[Tuple[int,int]]]:
+def _pdf_to_text_with_lines(pdf_path: str) -> Tuple[str, List[int]]:
     """
     Returns:
     - doc_text: full document text, pages joined with '\n\n' (TOC pages already filtered out)
-    - page_spans: list of (start_char_idx, end_char_idx) for each page in doc_text
     """
     doc = fitz.open(pdf_path)
     pieces = []
-    spans = []
-    page_meta: List[Dict] = []
-    cursor = 0
+    toc_index = []
     toc_pages_found = 0
     
     for pno in range(len(doc)):
@@ -123,18 +120,20 @@ def _pdf_to_text_with_lines(pdf_path: str) -> Tuple[str, List[Tuple[int,int]]]:
         # Check if this page is TOC and skip it
         if _is_toc_page(page_text):
             print(f"Skipping TOC page {pno + 1}")
+            toc_index.append(pno + 1)
             toc_pages_found += 1
             continue
-            
-        start = cursor  
+        if len(page_text) < 3:
+            print(f"Skipping unmeaningful page {pno + 1}")
+            toc_index.append(pno + 1)
+            toc_pages_found += 1
+            continue
         pieces.append(page_text)
-        cursor += len(page_text) + 2
-        spans.append((start, cursor))  # cursor is now after the '\n\n' inserted between pages
         
     if toc_pages_found > 0:
         print(f"Filtered out {toc_pages_found} TOC pages from {len(doc)} total pages")
-        
-    return "\n\n".join(pieces), spans
+
+    return "\n\n<<<PAGE_BREAK>>>".join(pieces), toc_index
 
     # ===================== Heading detection =====================
 
@@ -337,7 +336,7 @@ def _split_block_into_chunks_by_sentence(blk_text: str, min_tokens=MIN_TOKENS, m
     return chunks
 
 # ===================== Pack blocks into ~500 token chunks =====================
-def _pack_blocks_into_chunks(blocks: List[Dict], headings: List[Dict], min_tokens=MIN_TOKENS, max_tokens=MAX_TOKENS) -> List[Dict]:
+def _pack_blocks_into_chunks(blocks: List[Dict], headings: List[Dict], toc_index: List[int], min_tokens=MIN_TOKENS, max_tokens=MAX_TOKENS) -> List[Dict]:
     """
     Group blocks (in order) into ~500 token chunks, within [300, 500] when possible.
     - Oversized block -> split by sentences (don't break bullets).
@@ -348,21 +347,27 @@ def _pack_blocks_into_chunks(blocks: List[Dict], headings: List[Dict], min_token
     cur_inds: List[int] = []
     cur_block_indices: List[int] = []
     cur_tok = 0
+    cur_page = 1  # Track current page number
 
     def close():
-        nonlocal cur_parts, cur_inds, cur_block_indices, cur_tok
+        nonlocal cur_parts, cur_inds, cur_block_indices, cur_tok, cur_page
         if cur_parts:
             payload = "\n".join(cur_parts).strip("\n")
             # Get breadcrumbs for the first block in this chunk
             first_block_idx = cur_block_indices[0] if cur_block_indices else 0
             breadcrumbs = _build_breadcrumbs(headings, first_block_idx)
-            
+            page_increment = payload.count("<<<PAGE_BREAK>>>")
+            while cur_page + page_increment in toc_index:
+                cur_page += 1
             out.append({
-                "payload": payload,
+                "payload": payload.replace("<<<PAGE_BREAK>>>", ""),
                 "indent_levels": sorted(set(cur_inds)),
                 "breadcrumbs": breadcrumbs,
-                "block_indices": cur_block_indices.copy()
+                "block_indices": cur_block_indices.copy(),
+                "page_from": cur_page,
+                "page_to": cur_page + page_increment
             })
+            cur_page += page_increment
             cur_parts = []
             cur_inds = []
             cur_block_indices = []
@@ -419,31 +424,6 @@ def _pack_blocks_into_chunks(blocks: List[Dict], headings: List[Dict], min_token
     close()
     return out
 
-# ===================== Estimate page range =====================
-def _estimate_page_range(payload: str, doc_text: str, page_spans: List[Tuple[int, int]]) -> str:
-    try:
-        start_idx = doc_text.find(payload[:200])
-        end_idx = doc_text.find(payload[-200:])
-        if start_idx == -1 and end_idx == -1:
-            return "Unknown"
-        if start_idx == -1:
-            start_idx = end_idx
-        if end_idx == -1:
-            end_idx = start_idx + len(payload)
-
-        first_page = last_page = None
-        for i, (s, e) in enumerate(page_spans, start=1):
-            if first_page is None and start_idx < e:
-                first_page = i
-            if end_idx <= e and last_page is None:
-                last_page = i
-                break
-        if first_page is None: first_page = 1
-        if last_page is None: last_page = len(page_spans)
-        return f"{first_page}-{last_page}" if first_page != last_page else f"{first_page}"
-    except Exception:
-        return "Unknown"
-
 # ===================== Main API =====================
 def pdf_to_chunks_smart_indent(
     pdf_path: str,
@@ -459,19 +439,18 @@ def pdf_to_chunks_smart_indent(
 
     """
     file_name = os.path.basename(pdf_path)
-    doc_text, page_spans = _pdf_to_text_with_lines(pdf_path)
+    doc_text, toc_index = _pdf_to_text_with_lines(pdf_path)
     blocks = _lines_to_blocks(doc_text)
     
     # Extract headings for breadcrumb generation
     headings = _extract_headings_from_blocks(blocks)
-    
-    packed = _pack_blocks_into_chunks(blocks, headings, min_tokens=min_tokens, max_tokens=max_tokens)
+
+    packed = _pack_blocks_into_chunks(blocks, headings, toc_index, min_tokens=min_tokens, max_tokens=max_tokens)
 
     results = []
     doc_id = os.path.splitext(file_name)[0]  # Remove extension for doc_id
     
     for idx, ch in enumerate(packed):
-        page_range = _estimate_page_range(ch["payload"], doc_text, page_spans)
         
         # Build breadcrumb string
         breadcrumb_text = ""
@@ -483,20 +462,9 @@ def pdf_to_chunks_smart_indent(
         if breadcrumb_text:
             content_with_context = f"[Context: {breadcrumb_text}]\n\n{ch['payload']}"
         
-        # Parse page range for page_from and page_to
-        page_from = page_to = None
-        if page_range != "Unknown":
-            if "-" in page_range:
-                page_parts = page_range.split("-")
-                page_from = int(page_parts[0])
-                page_to = int(page_parts[1])
-            else:
-                page_from = page_to = int(page_range)
-        
         results.append({
             "chunk_id": idx,
             "file_name": file_name,
-            "page_range": page_range,
             "indent_levels": ch["indent_levels"],
             "content": content_with_context,
             "token_est": _tok_count(content_with_context),
@@ -506,8 +474,8 @@ def pdf_to_chunks_smart_indent(
             "section_title": ch["breadcrumbs"][-1] if ch["breadcrumbs"] else None,
             "heading_path": breadcrumb_text if breadcrumb_text else None,
             "chunk_index": idx,
-            "page_from": page_from,
-            "page_to": page_to,
+            "page_from": ch["page_from"],
+            "page_to": ch["page_to"],
             "breadcrumbs": ch["breadcrumbs"]
         })
     return results
@@ -519,7 +487,7 @@ if __name__ == "__main__":
 
     for ch in chunks:
         print("="*120)
-        print(f"File: {ch['file_name']} | Pages: {ch['page_range']} | Chunk: {ch['chunk_id']} | ~tokens: {ch['token_est']}")
+        print(f"File: {ch['file_name']} | Pages: {f"{ch['page_from']}-{ch['page_to']}"} | Chunk: {ch['chunk_id']} | ~tokens: {ch['token_est']}")
         print(f"Indent levels in chunk: {ch['indent_levels']}")
         print("="*10)
         print(ch['content'])

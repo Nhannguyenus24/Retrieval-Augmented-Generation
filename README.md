@@ -53,12 +53,14 @@ python src/cli/rag_interactive.py
 ## Upcoming Features
 - Improve chunking metadata (better recover heading pattern, page index for each chunks)
 - Switch model function (all-MiniLM-L6-v2 for fast response, all-mpnet-base-v2 for better accuracy, paraphrase-multilingual-MiniLM-L12-v2 for multilanguage)
+- Index to document in retrieve answer
 - Support Docx
 - Support Markdown file
 - Support TXT file
 - Rerank strategy for better chunk selection
 - One-shot query to llm
 - Pipeline AI agent (multicall to llm for better answer)
+- Backend server with OPENAPI
 - CI pipeline
 - Logs for debug
 
