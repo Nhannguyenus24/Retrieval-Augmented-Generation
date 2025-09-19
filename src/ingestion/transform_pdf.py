@@ -1,13 +1,18 @@
 import re
-iMIN_TOUSE_TIKTOKEN = False  # set True if tiktoken is installed for accurate token counting
-TAB_WIDTH = 4         # 1 tab = 4 spaces when calculating indent
-INDENT_STEP = 4       # indent difference threshold (>=) to consider as new "block"S = 300
-MAX_TOKENS = 500
-USE_TIKTOKEN = False  # set True if tiktoken is installed for accurate token counting
-TAB_WIDTH = 4         # 1 tab = 4 spaces when calculating indent
-INDENT_STEP = 4       # indent difference threshold (>=) to consider as new "block" fitz  # PyMuPDF
+import fitz  # PyMuPDF
 import os
+import sys
 from typing import List, Dict, Tuple, Optional
+
+# Add parent directory to path for imports
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+try:
+    from utils.pattern import *
+except ImportError:
+    # Fallback for direct execution
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+    from pattern import *
 
 # ===================== Configuration =====================
 MIN_TOKENS = 300
@@ -15,11 +20,6 @@ MAX_TOKENS = 500
 USE_TIKTOKEN = False  # set True if tiktoken is installed for accurate token counting
 TAB_WIDTH = 4         # 1 tab = 4 spaces when calculating indent
 INDENT_STEP = 4       # indent difference threshold (>=) to consider as new "block"
-MIN_TOKENS = 300
-MAX_TOKENS = 500
-USE_TIKTOKEN = False  # đặt True nếu đã cài tiktoken để đếm token sát mô hình
-TAB_WIDTH = 4         # 1 tab = 4 spaces khi tính indent
-INDENT_STEP = 4       # ngưỡng khác biệt indent (>=) coi là đổi “khối” (block)
 
 # ===================== Token counter =====================
 _tokenc = None
@@ -107,6 +107,7 @@ def _pdf_to_text_with_lines(pdf_path: str) -> Tuple[str, List[Tuple[int,int]]]:
     doc = fitz.open(pdf_path)
     pieces = []
     spans = []
+    page_meta: List[Dict] = []
     cursor = 0
     toc_pages_found = 0
     
@@ -124,30 +125,18 @@ def _pdf_to_text_with_lines(pdf_path: str) -> Tuple[str, List[Tuple[int,int]]]:
             print(f"Skipping TOC page {pno + 1}")
             toc_pages_found += 1
             continue
-        
-        start = cursor
+            
+        start = cursor  
         pieces.append(page_text)
         cursor += len(page_text) + 2
         spans.append((start, cursor))  # cursor is now after the '\n\n' inserted between pages
-    
+        
     if toc_pages_found > 0:
         print(f"Filtered out {toc_pages_found} TOC pages from {len(doc)} total pages")
-    
+        
     return "\n\n".join(pieces), spans
 
-# ===================== Heading detection =====================
-_HEADING_PATTERNS = [
-    # 1. Numbered or enumerated heading (numeric or lettered lists with optional dot/parenthesis)
-    re.compile(r'^\s*(?:\d+(?:\.\d+)*[\.)]?|[A-Z]+[\.)])\s+[A-Z][^.]*$'),
-    # 2. General heading: starts with capital, no ending punctuation
-    re.compile(r'^\s*[A-Z][^.!?]*[^.!?\s]$'),
-    # 3. "Chapter/Section" heading with number (digits or Roman numeral) and optional title
-    re.compile(
-        r'^\s*(?:Chapter|Section)\s+(?:\d+|[IVXLCDM]+)'
-        r'(?:(?:[\.\-:]\s*|\s+)[^.!?]+[^.!?\s])?$',
-        re.IGNORECASE
-    )
-]
+    # ===================== Heading detection =====================
 
 def _is_heading(line: str, font_size: Optional[float] = None, is_bold: bool = False) -> Tuple[bool, int]:
     """
@@ -165,7 +154,7 @@ def _is_heading(line: str, font_size: Optional[float] = None, is_bold: bool = Fa
         return True, min(dots, 6)
     
     # Check other patterns
-    for i, pattern in enumerate(_HEADING_PATTERNS):
+    for i, pattern in enumerate(HEADING_PATTERNS):
         if pattern.match(line_clean):
             # First pattern (numbered) handled above
             if i == 0:
@@ -233,7 +222,6 @@ def _build_breadcrumbs(headings: List[Dict], current_block_index: int) -> List[s
     return breadcrumbs
 
 # ===================== Line -> indent =====================
-_WS_ONLY = re.compile(r"^\s*$")
 
 def _indent_width(line: str) -> int:
     # calculate indent in number of spaces (tab => TAB_WIDTH spaces)
@@ -263,7 +251,7 @@ def _lines_to_blocks(text: str) -> List[Dict]:
             buf = []
 
     for ln in raw_lines:
-        if _WS_ONLY.match(ln):
+        if WHITESPACE_ONLY_PATTERN.match(ln):
             # blank line => end current block
             flush()
             cur_indent = None
@@ -288,8 +276,6 @@ def _lines_to_blocks(text: str) -> List[Dict]:
     return blocks
 
 # ===================== Split large blocks by sentences =====================
-_BULLET_PAT = re.compile(r"^\s*([\-•\*]|\d+[\.\)])\s+")
-_SENT_SPLIT = re.compile(r"(?<=[\.\?\!…])\s+")
 
 def _split_block_into_chunks_by_sentence(blk_text: str, min_tokens=MIN_TOKENS, max_tokens=MAX_TOKENS) -> List[str]:
     """
@@ -301,11 +287,11 @@ def _split_block_into_chunks_by_sentence(blk_text: str, min_tokens=MIN_TOKENS, m
         line = line.rstrip()
         if not line:
             continue
-        if _BULLET_PAT.match(line):
+        if BULLET_PATTERN.match(line):
             parts.append(line)
         else:
             # additionally split by sentences for regular lines
-            segs = _SENT_SPLIT.split(line)
+            segs = SPLIT_PATTERN.split(line)
             for s in segs:
                 s = s.strip()
                 if s:

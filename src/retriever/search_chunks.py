@@ -35,7 +35,7 @@ class ChromaChunkSearcher:
             print(f"Connected to ChromaDB at {host}:{port}")
         except Exception as e:
             print(f"ChromaDB connection error: {e}")
-            print("Make sure the ChromaDB server is running (docker-compose up)")
+            print("Make sure the ChromaDB server is running (docker-compose up -d)")
             sys.exit(1)
             
         # Get collection
@@ -178,9 +178,10 @@ class ChromaChunkSearcher:
             if result['indent_levels']:
                 print(f"   Indent levels: {result['indent_levels']}")
             
+            # Show heading information if available
+            if result.get('heading_path'):
                 print(f"   Heading path: {result['heading_path']}")
-                print(f"   Section title: {result['heading_path']}")
-                print(f"   Bread crumb: {result['heading_path']}") 
+            
             if show_content:
                 content = result['content']
                 print(f"   Content:")

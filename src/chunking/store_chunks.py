@@ -8,18 +8,28 @@ import os
 import sys
 import json
 from typing import List, Dict, Optional
+
+# Add parent directory to path for imports
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
 os.environ["ANONYMIZED_TELEMETRY"] = "FALSE"
 import chromadb
 from chromadb.config import Settings
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-from transformpdf import pdf_to_chunks_smart_indent
+
+try:
+    from ingestion.transform_pdf import pdf_to_chunks_smart_indent
+except ImportError:
+    # Fallback for direct execution
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'ingestion'))
+    from transform_pdf import pdf_to_chunks_smart_indent
 
 # ===================== Configuration =====================
 CHROMA_HOST = "localhost"
 CHROMA_PORT = 8000
 COLLECTION_NAME = "pdf_chunk"
-# EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # Sentence transformer model - lightweight model
-EMBEDDING_MODEL = "all-mpnet-base-v2"  # Sentence transformer model
+EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # Sentence transformer model - lightweight model
+# EMBEDDING_MODEL = "all-mpnet-base-v2"  # Sentence transformer model
 
 class ChromaChunkStore:
     def __init__(self, host: str = CHROMA_HOST, port: int = CHROMA_PORT, collection_name: str = COLLECTION_NAME):
@@ -43,7 +53,7 @@ class ChromaChunkStore:
         # Create or get collection
         try:
             # Try to get existing collection first
-            self.collection = self.client.get_collection(name=collection_name, embedding_function=embedding_func)
+            self.collection = self.client.get_collection(name=collection_name)
             print(f"Using existing collection: {collection_name}")
         except Exception:
             # If not exists, create new one
