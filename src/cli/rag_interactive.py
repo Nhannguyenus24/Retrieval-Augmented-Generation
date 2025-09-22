@@ -1,41 +1,11 @@
-#!/usr/bin/env python3
-"""
-RAG Interactive CLI - Beautiful Interactive Interface
-A comprehensive interactive CLI tool for RAG operations with enhanced visual presentation.
-
-Features:
-- Beautiful ASCII interface with symbols and borders
-- Continuous loop operation
-- Full RAG functionality (chunk, store, search)
-- Enhanced visual feedback
-- Comprehensive information display
-"""
-
 import os
 import sys
 import json
 import time
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
-
-# Add parent directories to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'ingestion'))
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'chunking'))
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'retriever'))
-
-# Suppress ChromaDB telemetry
-os.environ["ANONYMIZED_TELEMETRY"] = "FALSE"
-
-try:
-    from ingestion.transform_pdf import pdf_to_chunks_smart_indent
-    from chunking.store_chunks import ChromaChunkStore
-    from retriever.search_chunks import ChromaChunkSearcher
-    from llm.provider.gemini import one_shot
-except ImportError as e:
-    print(f"Import error: {e}")
-    print("Make sure you're running from the project root directory")
-    sys.exit(1)
+from ingestion.transform_pdf import pdf_to_chunks_smart_indent
+from chunking.store_chunks import ChromaChunkStore
+from retriever.search_chunks import ChromaChunkSearcher
+from llm.provider.gemini import one_shot
 
 # ===================== Configuration =====================
 DEFAULT_MIN_TOKENS = 300

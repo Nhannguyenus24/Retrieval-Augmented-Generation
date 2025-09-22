@@ -3,13 +3,11 @@ import logging
 from fastapi import FastAPI
 import uvicorn
 from api.router import router
+import dotenv 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-)
-logger = logging.getLogger("app")
-logger.info("App started")
+dotenv.load_dotenv()
+
+logger = logging.getLogger("uvicorn")
 
 app = FastAPI(
     title="RAG API",
@@ -19,5 +17,6 @@ app = FastAPI(
 
 app.include_router(router)
 
-logger.info("Starting FastAPI server")
-uvicorn.run(app, host="127.0.0.1", port=8000, reload=True)
+if __name__ == "__main__":
+    logger.info("Starting FastAPI server (no reload)")
+    uvicorn.run(app, host="0.0.0.0", port=1234, reload=False)

@@ -1,5 +1,8 @@
 import re
 
+
+ROMAN_NUMERAL_PATTERN = re.compile(r'^M{0,4}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$', re.IGNORECASE)
+
 HEADING_PATTERNS = [
     # 1. Numbered or enumerated heading (numeric or lettered lists with optional dot/parenthesis)
     re.compile(r'^\s*(?:\d+(?:\.\d+)*[\.)]?|[A-Z]+[\.)])\s+[A-Z][^.]*$'),

@@ -1,15 +1,9 @@
-#!/usr/bin/env python3
-"""
-Script to search chunks in a ChromaDB vector database.
-Takes input from console and returns the top-k most similar chunks.
-"""
 import os
 import sys
 import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from typing import List, Dict, Optional, Tuple
-os.environ["ANONYMIZED_TELEMETRY"] = "FALSE"
 import chromadb
 from chromadb.config import Settings
 from llm.provider.gemini import *
@@ -276,36 +270,3 @@ class ChromaChunkSearcher:
             except Exception as e:
                 print(f"Error: {e}")
 
-def main():
-    """Main function for command line execution"""
-    if len(sys.argv) > 1 and sys.argv[1] in ['-h', '--help']:
-        print("Usage:")
-        print(f"  python {sys.argv[0]}                             # Interactive mode")
-        print(f"  python {sys.argv[0]} \"<query>\" [top_k]            # One-shot search")
-        print(f"  python {sys.argv[0]} --delete                     # Delete entire collection")
-        print()
-        print("Examples:")
-        print(f"  python {sys.argv[0]}                             # Run interactive mode")
-        print(f"  python {sys.argv[0]} \"machine learning\" 3          # Search 3 chunks about ML")
-        print(f"  python {sys.argv[0]} --delete                     # Delete all chunks")
-        sys.exit(0)
-    
-    # Initialize searcher
-    searcher = ChromaChunkSearcher()
-    
-    if len(sys.argv) == 1:
-        # Interactive mode
-        searcher.interactive_search()
-    elif len(sys.argv) > 1 and sys.argv[1] == '--delete':
-        # Delete collection
-        searcher.delete_collection()
-    else:
-        # One-shot search
-        query = sys.argv[1]
-        top_k = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_TOP_K
-        
-        results = searcher.search_chunks(query, top_k=top_k)
-        searcher.print_search_results(results)
-
-if __name__ == "__main__":
-    main()

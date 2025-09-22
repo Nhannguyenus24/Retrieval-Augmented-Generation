@@ -8,17 +8,8 @@ import sys
 import hashlib
 from typing import List, Dict, Optional, Set
 from collections import defaultdict
-
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-
-# Import required libraries
-try:
-    from rank_bm25 import BM25Okapi
-    from sentence_transformers import CrossEncoder
-except ImportError as e:
-    print(f"Missing required packages. Please install: pip install rank-bm25 sentence-transformers")
-    print(f"Error: {e}")
-    sys.exit(1)
+from rank_bm25 import BM25Okapi
+from sentence_transformers import CrossEncoder
 
 # ===================== Configuration =====================
 DEFAULT_TOP_M_FUSION = 30      # Top-M after RRF fusion
@@ -62,6 +53,19 @@ def _remove_stopwords_vi(tokens: List[str]) -> List[str]:
         'các', 'này', 'đó', 'như', 'từ', 'về', 'theo', 'sau', 'trước', 'khi',
         'nếu', 'nhưng', 'hoặc', 'cũng', 'đã', 'sẽ', 'bằng', 'tại', 'trên', 'dưới'
     }
+    en_stopwords = {
+    'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'of', 'and', 'or', 'but', 'if', 'then', 'else',
+    'the', 'a', 'an', 'this', 'that', 'these', 'those',
+    'in', 'on', 'at', 'by', 'for', 'with', 'about', 'into', 'through',
+    'to', 'from', 'up', 'down', 'over', 'under',
+    'as', 'so', 'than', 'too', 'very',
+    'can', 'could', 'may', 'might', 'shall', 'should', 'will', 'would',
+    'do', 'does', 'did', 'done', 'doing',
+    'have', 'has', 'had', 'having',
+    'not', 'no', 'nor', 'also', 'just', 'only'
+    }
+
     return [token for token in tokens if token not in vi_stopwords]
 
 def _advanced_tokenize_vi(text: str, remove_stopwords: bool = True) -> List[str]:
@@ -447,51 +451,3 @@ def analyze_reranking_results(results: List[Dict]) -> None:
     print(f"Files represented: {len(file_counts)}")
     for file, count in sorted(file_counts.items()):
         print(f"  {file}: {count} chunks")
-
-# ===================== Example Usage =====================
-def main():
-    """Example usage of re-ranking functions"""
-    # Mock search results for demonstration
-    mock_results = [
-        {
-            "id": "doc1_chunk1",
-            "content": "Machine learning is a subset of artificial intelligence that focuses on algorithms.",
-            "similarity": 0.85,
-            "file_name": "ml_basics.pdf",
-            "chunk_id": 1
-        },
-        {
-            "id": "doc1_chunk2", 
-            "content": "Deep learning uses neural networks with multiple layers to learn representations.",
-            "similarity": 0.82,
-            "file_name": "ml_basics.pdf",
-            "chunk_id": 2
-        },
-        {
-            "id": "doc2_chunk1",
-            "content": "Natural language processing enables computers to understand human language.",
-            "similarity": 0.78,
-            "file_name": "nlp_guide.pdf",
-            "chunk_id": 1
-        }
-    ]
-    
-    query = "what is machine learning and deep learning"
-    
-    print("=== EXAMPLE RE-RANKING ===")
-    reranked = rerank_fusion_then_crossencoder(
-        query=query,
-        search_results=mock_results,
-        top_m_after_fusion=3,
-        top_k_final=2
-    )
-    
-    print("\n=== RESULTS ===")
-    for i, result in enumerate(reranked, 1):
-        print(f"{i}. {result['file_name']} (ID: {result['id']})")
-        print(f"   CE Score: {result['ce_score']:.3f} | RRF: {result['rrf_score']:.3f}")
-        print(f"   Content: {result['content'][:80]}...")
-        print()
-
-if __name__ == "__main__":
-    main()

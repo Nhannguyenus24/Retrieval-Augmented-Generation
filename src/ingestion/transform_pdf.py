@@ -4,6 +4,7 @@ import os
 from typing import List, Dict, Tuple, Optional
 from utils.pattern import *
 from dotenv import load_dotenv
+import tiktoken
 
 # Load environment variables
 load_dotenv()
@@ -19,13 +20,12 @@ INDENT_STEP = int(os.getenv("INDENT_STEP", 4))
 _tokenc = None
 
 def _approx_token_count(s: str) -> int:
-    return max(1, len(s.split()))
+    return max(1, len(s) / 4)
 
 def _tok_count(s: str) -> int:
     global _tokenc
     if USE_TIKTOKEN:
         try:
-            import tiktoken
             if _tokenc is None:
                 _tokenc = tiktoken.get_encoding("cl100k_base")
             return len(_tokenc.encode(s))
@@ -50,7 +50,7 @@ def _is_toc_page(page_text: str) -> bool:
             'table of contents', 'mục lục',
         ]):
             toc_indicators += 1
-    
+
     # Count different types of TOC patterns
     page_number_lines = 0
     dot_lines = 0

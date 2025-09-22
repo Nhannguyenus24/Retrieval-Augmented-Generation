@@ -1,3 +1,4 @@
+# docker-compose.prod.yml
 version: '3.8'
 
 services:
@@ -7,7 +8,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./chroma_data:/chroma/chroma  # Persistent storage
+      - ./chroma_data:/chroma/chroma
     environment:
       - CHROMA_SERVER_HOST=0.0.0.0
       - CHROMA_SERVER_HTTP_PORT=8000
@@ -20,3 +21,40 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    networks:
+      - rag-network
+
+  rag-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-server
+    ports:
+      - "1234:1234"
+    environment:
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MIN_TOKENS=300
+      - MAX_TOKENS=500
+      - USE_TIKTOKEN=false
+    volumes:
+      - ./docs:/app/docs:ro
+      - ./chroma_data:/app/chroma_data
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:1234/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - rag-network
+
+networks:
+  rag-network:
+    driver: bridge

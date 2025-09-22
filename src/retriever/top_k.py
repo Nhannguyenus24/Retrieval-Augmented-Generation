@@ -1,14 +1,7 @@
-#!/usr/bin/env python3
-"""
-Top-K retrieval and neighbor expansion functions for ChromaDB vector search.
-Provides utilities to get top-k similar chunks and expand with neighboring chunks.
-"""
 import os
 import sys
 import json
-
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from typing import List, Dict, Optional, Tuple, Set
+from typing import List, Dict, Set
 os.environ["ANONYMIZED_TELEMETRY"] = "FALSE"
 import chromadb
 from chromadb.config import Settings
@@ -140,11 +133,8 @@ class TopKRetriever:
             
             # Build where clause for filtering
             where_clause = {
-                "doc_id": doc_id,
-                "$and": [
-                    {"chunk_index": {"$gte": start_idx}},
-                    {"chunk_index": {"$lte": end_idx}}
-                ]
+            "doc_id": doc_id,
+            "chunk_index": {"$gte": start_idx, "$lte": end_idx}
             }
             
             # Query neighbors
@@ -309,44 +299,3 @@ def get_expanded_results(query: str, top_k: int = DEFAULT_TOP_K,
     """
     retriever = TopKRetriever(host, port, collection_name)
     return retriever.get_expanded_chunks(query, top_k, neighbor_window, min_similarity)
-
-# ===================== Usage Examples =====================
-
-def main():
-    """Example usage"""
-    if len(sys.argv) < 2:
-        print("Usage:")
-        print(f"  python {sys.argv[0]} \"<query>\" [top_k] [window]")
-        print()
-        print("Examples:")
-        print(f"  python {sys.argv[0]} \"machine learning\" 3 2")
-        print(f"  python {sys.argv[0]} \"neural networks\" 5")
-        sys.exit(1)
-    
-    query = sys.argv[1]
-    top_k = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_TOP_K
-    window = int(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_NEIGHBOR_WINDOW
-    
-    print(f"Query: '{query}' | Top-K: {top_k} | Neighbor Window: {window}")
-    print("="*80)
-    
-    # Example 1: Get top-k only
-    print("\n1. TOP-K CHUNKS ONLY:")
-    top_chunks = get_top_k(query, top_k)
-    for i, chunk in enumerate(top_chunks):
-        print(f"  {i+1}. [{chunk['doc_id']}] Chunk {chunk['chunk_index']} | Similarity: {chunk['similarity']}")
-        print(f"     {chunk['content'][:100]}...")
-        print()
-    
-    # Example 2: Get expanded results
-    print("\n2. EXPANDED CHUNKS (TOP-K + NEIGHBORS):")
-    expanded_chunks = get_expanded_results(query, top_k, window)
-    for chunk in expanded_chunks:
-        marker = "★" if chunk.get('is_top_k', False) else "○"
-        sim_str = f"| Sim: {chunk['similarity']}" if chunk['similarity'] else ""
-        print(f"  {marker} [{chunk['doc_id']}] Chunk {chunk['chunk_index']} {sim_str}")
-        print(f"     {chunk['content'][:100]}...")
-        print()
-
-if __name__ == "__main__":
-    main()

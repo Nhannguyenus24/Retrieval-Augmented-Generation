@@ -1,28 +1,17 @@
-#!/usr/bin/env python3
-"""
-Script to store PDF chunks into ChromaDB vector database
-Uses transformpdf.py to create chunks and store them in ChromaDB
-"""
-
 import os
 import sys
 import json
-from typing import List, Dict, Optional
-
-# Add parent directory to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-
+from typing import Dict, List
+from llm.prompt import gemini
 os.environ["ANONYMIZED_TELEMETRY"] = "FALSE"
 import chromadb
-from chromadb.config import Settings
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
-try:
-    from ingestion.transform_pdf import pdf_to_chunks_smart_indent
-except ImportError:
-    # Fallback for direct execution
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'ingestion'))
-    from transform_pdf import pdf_to_chunks_smart_indent
+
+from ingestion.transform_pdf import pdf_to_chunks_smart_indent
+from ingestion.transform_txt import txt_to_chunks_smart_indent
+from ingestion.transform_md import md_to_chunks_smart_indent
+from ingestion.transform_docx import docx_to_chunks_smart_indent
 
 # ===================== Configuration =====================
 CHROMA_HOST = "localhost"
@@ -64,94 +53,81 @@ class ChromaChunkStore:
                 print(f"Error creating collection: {e}")
                 sys.exit(1)
 
-    def store_pdf_chunks(self, pdf_path: str, min_tokens: int = 300, max_tokens: int = 500) -> bool:
-        """
-        Process PDF into chunks and store in ChromaDB
-        
-        Args:
-            pdf_path: Path to PDF file
-            min_tokens: Minimum tokens per chunk
-            max_tokens: Maximum tokens per chunk
-            
-        Returns:
-            bool: True if successful, False if error
-        """
-        if not os.path.exists(pdf_path):
-            print(f"File does not exist: {pdf_path}")
+    def get_summary(chunks: List[Dict]) -> str:
+        """Generate a summary from the chunks and metadata"""
+        return gemini.one_shot(str(chunks), "", template_name="summary.jinja")
+
+    def store_chunks(self, folder_path: str, min_tokens: int = 300, max_tokens: int = 500) -> bool:
+        # Process all files in the folder into chunks and store
+        if not os.path.exists(folder_path):
+            print(f"Folder not found: {folder_path}")
             return False
-            
+        
         try:
-            print(f"Processing PDF: {pdf_path}")
-            
-            # Create chunks from PDF
-            chunks = pdf_to_chunks_smart_indent(pdf_path, min_tokens=min_tokens, max_tokens=max_tokens)
-            
-            if not chunks:
-                print("No chunks created from PDF")
-                return False
-                
-            print(f"Created {len(chunks)} chunks")
-            
-            # Prepare data for ChromaDB
             documents = []
             metadatas = []
             ids = []
-            
-            for chunk in chunks:
-                # Unique ID for each chunk
-                chunk_id = f"{chunk['file_name']}_{chunk['chunk_id']}"
-                
-                # Chunk content
-                documents.append(chunk['content'])
 
-                page_from = str(chunk.get('page_from', 'Unknown'))
-                page_to   = str(chunk.get('page_to', 'Unknown'))
-                page_range = page_from if page_from == page_to else f"{page_from}-{page_to}"
+            for filename in os.listdir(folder_path):
+                file_path = os.path.join(folder_path, filename)
+                if filename.endswith(".pdf"):
+                    chunks = pdf_to_chunks_smart_indent(file_path, min_tokens=min_tokens, max_tokens=max_tokens)
+                elif filename.endswith(".txt"):
+                    chunks = txt_to_chunks_smart_indent(file_path, min_tokens=min_tokens, max_tokens=max_tokens)
+                elif filename.endswith(".md"):
+                    chunks = md_to_chunks_smart_indent(file_path, min_tokens=min_tokens, max_tokens=max_tokens)
+                elif filename.endswith(".docx"):
+                    chunks = docx_to_chunks_smart_indent(file_path, min_tokens=min_tokens, max_tokens=max_tokens)
+                else:
+                    print(f"Unsupported file type: {filename}")
+                    continue
+                
+                if not chunks:
+                    print(f"No valid chunks found for file: {filename}")
+                    continue
 
-                
-                # Enhanced metadata with breadcrumbs and new fields
-                metadata = {
-                    "file_name": chunk['file_name'],
-                    "chunk_id": chunk['chunk_id'],
-                    "page_range": page_range,
-                    "indent_levels": json.dumps(chunk['indent_levels']),
-                    "token_count": chunk['token_est'],
-                    "source_path": os.path.abspath(pdf_path),
-                    # New metadata fields
-                    "doc_id": chunk.get('doc_id'),
-                    "source": chunk.get('source'),
-                    "section_title": chunk.get('section_title'),
-                    "heading_path": chunk.get('heading_path'),
-                    "chunk_index": chunk.get('chunk_index'),
-                    "page_from": chunk.get('page_from'),
-                    "page_to": chunk.get('page_to'),
-                    "breadcrumbs": json.dumps(chunk.get('breadcrumbs', [])) if chunk.get('breadcrumbs') else None
-                }
-                
-                # Remove None values to keep metadata clean
-                metadata = {k: v for k, v in metadata.items() if v is not None}
-                metadatas.append(metadata)
-                
-                ids.append(chunk_id)
-            
-            # Save to ChromaDB (will automatically create embeddings)
-            print("Saving chunks to ChromaDB...")
-            self.collection.add(
-                documents=documents,
-                metadatas=metadatas,
-                ids=ids
-            )
-            
-            print(f"Successfully saved {len(chunks)} chunks to collection '{self.collection_name}'")
-            
-            # Statistics
-            total_docs = self.collection.count()
-            print(f"Total documents in collection: {total_docs}")
-            
+                print(f"Created {len(chunks)} chunks from {filename}")
+
+                for chunk in chunks:
+                    chunk_id = f"{chunk['file_name']}_{chunk['chunk_id']}"
+                    # Chunk content
+                    documents.append(chunk['content'])
+
+                    page_from = str(chunk.get('page_from', 'Unknown'))
+                    page_to   = str(chunk.get('page_to', 'Unknown'))
+                    page_range = page_from if page_from == page_to else f"{page_from}-{page_to}"
+
+                    
+                    # Enhanced metadata with breadcrumbs and new fields
+                    metadata = {
+                        "file_name": chunk['file_name'],
+                        "chunk_id": chunk['chunk_id'],
+                        "page_range": page_range,
+                        "indent_levels": json.dumps(chunk['indent_levels']),
+                        "token_count": chunk['token_est'],
+                        "source_path": os.path.abspath(file_path),
+                        # New metadata fields
+                        "doc_id": chunk.get('doc_id'),
+                        "source": chunk.get('source'),
+                        "section_title": chunk.get('section_title'),
+                        "heading_path": chunk.get('heading_path'),
+                        "chunk_index": chunk.get('chunk_index'),
+                        "page_from": chunk.get('page_from'),
+                        "page_to": chunk.get('page_to'),
+                        "breadcrumbs": json.dumps(chunk.get('breadcrumbs', [])) if chunk.get('breadcrumbs') else None
+                    }
+                    
+                    # Remove None values to keep metadata clean
+                    metadata = {k: v for k, v in metadata.items() if v is not None}
+                    metadatas.append(metadata)
+                    
+                    ids.append(chunk_id)
+
+            self.collection.add(documents=documents, metadatas=metadatas, ids=ids)
+            print(f"Added {len(documents)} documents to collection")
             return True
-            
         except Exception as e:
-            print(f"Error saving chunks: {e}")
+            print(f"Error processing files in folder: {e}")
             return False
 
     def clear_collection(self) -> bool:
@@ -194,48 +170,3 @@ class ChromaChunkStore:
         except Exception as e:
             print(f"Error getting statistics: {e}")
             return {}
-
-def main():
-    """Main function to run from command line"""
-    if len(sys.argv) < 2:
-        print("Usage:")
-        print(f"  python {sys.argv[0]} <pdf_path> [min_tokens] [max_tokens]")
-        print(f"  python {sys.argv[0]} --clear  # Clear all chunks")
-        print(f"  python {sys.argv[0]} --stats  # View statistics")
-        print()
-        print("Examples:")
-        print(f"  python {sys.argv[0]} 123.pdf")
-        print(f"  python {sys.argv[0]} 123.pdf 250 600")
-        sys.exit(1)
-    
-    # Initialize store
-    store = ChromaChunkStore()
-    
-    if sys.argv[1] == "--clear":
-        store.clear_collection()
-        return
-    
-    if sys.argv[1] == "--stats":
-        stats = store.get_collection_stats()
-        print("Collection Statistics:")
-        print(json.dumps(stats, indent=2, ensure_ascii=False))
-        return
-    
-    # Process PDF
-    pdf_path = sys.argv[1]
-    min_tokens = int(sys.argv[2]) if len(sys.argv) > 2 else 300
-    max_tokens = int(sys.argv[3]) if len(sys.argv) > 3 else 500
-    
-    print(f"Configuration: min_tokens={min_tokens}, max_tokens={max_tokens}")
-    
-    success = store.store_pdf_chunks(pdf_path, min_tokens=min_tokens, max_tokens=max_tokens)
-    
-    if success:
-        print("\nCompleted! Chunks have been saved to ChromaDB")
-        print("You can now use search_chunks.py to search")
-    else:
-        print("\nError occurred during processing")
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
