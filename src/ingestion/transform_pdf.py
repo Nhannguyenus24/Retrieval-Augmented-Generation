@@ -1,25 +1,19 @@
 import re
 import fitz  # PyMuPDF
 import os
-import sys
 from typing import List, Dict, Tuple, Optional
+from utils.pattern import *
+from dotenv import load_dotenv
 
-# Add parent directory to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-
-try:
-    from utils.pattern import *
-except ImportError:
-    # Fallback for direct execution
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
-    from pattern import *
+# Load environment variables
+load_dotenv()
 
 # ===================== Configuration =====================
-MIN_TOKENS = 300
-MAX_TOKENS = 500
-USE_TIKTOKEN = False  # set True if tiktoken is installed for accurate token counting
-TAB_WIDTH = 4         # 1 tab = 4 spaces when calculating indent
-INDENT_STEP = 4       # indent difference threshold (>=) to consider as new "block"
+MIN_TOKENS = int(os.getenv("MIN_TOKENS", 300))
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", 500))
+USE_TIKTOKEN = os.getenv("USE_TIKTOKEN", "false").lower() == "true"
+TAB_WIDTH = int(os.getenv("TAB_WIDTH", 4))
+INDENT_STEP = int(os.getenv("INDENT_STEP", 4))
 
 # ===================== Token counter =====================
 _tokenc = None
@@ -479,15 +473,3 @@ def pdf_to_chunks_smart_indent(
             "breadcrumbs": ch["breadcrumbs"]
         })
     return results
-
-# ===================== Demo =====================
-if __name__ == "__main__":
-    pdf_path = "./123.pdf"
-    chunks = pdf_to_chunks_smart_indent(pdf_path, min_tokens=300, max_tokens=500)
-
-    for ch in chunks:
-        print("="*120)
-        print(f"File: {ch['file_name']} | Pages: {f"{ch['page_from']}-{ch['page_to']}"} | Chunk: {ch['chunk_id']} | ~tokens: {ch['token_est']}")
-        print(f"Indent levels in chunk: {ch['indent_levels']}")
-        print("="*10)
-        print(ch['content'])

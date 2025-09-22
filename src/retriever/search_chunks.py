@@ -121,7 +121,7 @@ class ChromaChunkSearcher:
                     'indent_levels': indent_levels,
                     'content': doc,
                     'source_path': metadata.get('source_path', 'Unknown')
-
+                    
                 }
                 
                 search_results.append(result)
