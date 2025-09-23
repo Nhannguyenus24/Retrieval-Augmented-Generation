@@ -1,18 +1,22 @@
 import os
-import sys
+import logging
 import json
 from typing import List, Dict, Set
 os.environ["ANONYMIZED_TELEMETRY"] = "FALSE"
 import chromadb
 from chromadb.config import Settings
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
 # ===================== Configuration =====================
-CHROMA_HOST = "localhost"
-CHROMA_PORT = 8000
-COLLECTION_NAME = "pdf_chunk"
-DEFAULT_TOP_K = 5
-MAX_TOP_K = 100
-DEFAULT_NEIGHBOR_WINDOW = 2  # Number of neighbors on each side
+CHROMA_HOST = str(os.getenv("CHROMA_HOST", "chromadb"))
+CHROMA_PORT = int(os.getenv("CHROMA_PORT", 8000))
+COLLECTION_NAME = str(os.getenv("COLLECTION_NAME", "SOF_DOCUMENTATION"))
+DEFAULT_TOP_K = int(os.getenv("DEFAULT_TOP_K", 20))
+MAX_TOP_K = int(os.getenv("MAX_TOP_K", 50))
+DEFAULT_NEIGHBOR_WINDOW = int(os.getenv("DEFAULT_NEIGHBOR_WINDOW", 2))
 
 class TopKRetriever:
     def __init__(self, host: str = CHROMA_HOST, port: int = CHROMA_PORT, collection_name: str = COLLECTION_NAME):
@@ -72,43 +76,27 @@ class TopKRetriever:
             for i, (doc, metadata, distance, doc_id) in enumerate(zip(documents, metadatas, distances, ids)):
                 # Convert distance to similarity score (1.0 = most similar, 0.0 = least similar)
                 similarity = max(0.0, 1.0 - distance)
-                
+                page_from = metadata.get('page_from', None)
+                page_to = metadata.get('page_to', None)
+                if (page_from is None) or (page_to is None):
+                    page_range = None
+                else:
+                    page_range = str(page_from) if page_from == page_to else f"{page_from}-{page_to}"
                 # Filter by similarity threshold
                 if similarity < min_similarity:
                     continue
-                
-                # Parse metadata
-                try:
-                    indent_levels = json.loads(metadata.get('indent_levels', '[]'))
-                except:
-                    indent_levels = []
-
-                page_from = metadata.get('page_from', 'Unknown')
-                page_to = metadata.get('page_to', 'Unknown')
-                page_range = str(page_from) if page_from == page_to else f"{page_from}-{page_to}"
 
                 chunk = {
                     'id': doc_id,
-                    'similarity': round(similarity, 4),
-                    'distance': round(distance, 4),
                     'file_name': metadata.get('file_name', 'Unknown'),
                     'doc_id': metadata.get('doc_id', 'Unknown'),
                     'chunk_id': metadata.get('chunk_id', -1),
                     'chunk_index': metadata.get('chunk_index', -1),
                     'page_range': page_range,
-                    'page_from': page_from,
-                    'page_to': page_to,
                     'token_count': metadata.get('token_count', 0),
-                    'indent_levels': indent_levels,
                     'content': doc,
-                    'source_path': metadata.get('source_path', 'Unknown'),
-                    'section_title': metadata.get('section_title'),
-                    'heading_path': metadata.get('heading_path'),
-                    'breadcrumbs': json.loads(metadata.get('breadcrumbs', '[]')) if metadata.get('breadcrumbs') else []
                 }
-                
                 chunks.append(chunk)
-            
             return chunks
             
         except Exception as e:
@@ -131,11 +119,14 @@ class TopKRetriever:
             start_idx = max(0, chunk_index - window)
             end_idx = chunk_index + window
             
-            # Build where clause for filtering
             where_clause = {
-            "doc_id": doc_id,
-            "chunk_index": {"$gte": start_idx, "$lte": end_idx}
+                "$and": [
+                    {"doc_id": {"$eq": doc_id}},
+                    {"chunk_index": {"$gte": start_idx}},
+                    {"chunk_index": {"$lte": end_idx}}
+                ]
             }
+
             
             # Query neighbors
             results = self.collection.get(
@@ -153,31 +144,23 @@ class TopKRetriever:
             ids = results['ids']
             
             for doc, metadata, doc_id in zip(documents, metadatas, ids):
-                try:
-                    indent_levels = json.loads(metadata.get('indent_levels', '[]'))
-                except:
-                    indent_levels = []
 
-                page_from = metadata.get('page_from', 'Unknown')
-                page_to = metadata.get('page_to', 'Unknown')
-                page_range = str(page_from) if page_from == page_to else f"{page_from}-{page_to}"
+                page_from = metadata.get('page_from', None)
+                page_to = metadata.get('page_to', None)
+                if (page_from is None) or (page_to is None):
+                    page_range = None
+                else:
+                    page_range = str(page_from) if page_from == page_to else f"{page_from}-{page_to}"
 
                 neighbor = {
                     'id': doc_id,
-                    'file_name': metadata.get('file_name', 'Unknown'),
-                    'doc_id': metadata.get('doc_id', 'Unknown'),
+                    'file_name': metadata.get('file_name', ''),
+                    'doc_id': metadata.get('doc_id', ''),
                     'chunk_id': metadata.get('chunk_id', -1),
                     'chunk_index': metadata.get('chunk_index', -1),
                     'page_range': page_range,
-                    'page_from': page_from,
-                    'page_to': page_to,
                     'token_count': metadata.get('token_count', 0),
-                    'indent_levels': indent_levels,
                     'content': doc,
-                    'source_path': metadata.get('source_path', 'Unknown'),
-                    'section_title': metadata.get('section_title'),
-                    'heading_path': metadata.get('heading_path'),
-                    'breadcrumbs': json.loads(metadata.get('breadcrumbs', '[]')) if metadata.get('breadcrumbs') else []
                 }
                 
                 neighbors.append(neighbor)
@@ -225,15 +208,6 @@ class TopKRetriever:
             # Add all chunks (including the original chunk and neighbors)
             for neighbor in neighbors:
                 if neighbor['id'] not in seen_ids:
-                    # Mark original top-k chunks
-                    neighbor['is_top_k'] = neighbor['id'] == chunk['id']
-                    if neighbor['is_top_k']:
-                        neighbor['similarity'] = chunk['similarity']
-                        neighbor['distance'] = chunk['distance']
-                    else:
-                        neighbor['is_top_k'] = False
-                        neighbor['similarity'] = None
-                        neighbor['distance'] = None
                     
                     all_chunks.append(neighbor)
                     seen_ids.add(neighbor['id'])
@@ -260,7 +234,6 @@ class TopKRetriever:
         """
         return self.get_expanded_chunks(query, top_k, context_window, min_similarity)
 
-# ===================== Convenience Functions =====================
 
 def get_top_k(query: str, top_k: int = DEFAULT_TOP_K, min_similarity: float = 0.0,
               host: str = CHROMA_HOST, port: int = CHROMA_PORT, 

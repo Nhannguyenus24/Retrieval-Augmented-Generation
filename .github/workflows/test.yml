@@ -1,0 +1,107 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }} Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    
+    services:
+      chromadb:
+        image: chromadb/chroma:1.0.0
+        ports:
+          - 8000:8000
+        env:
+          CHROMA_SERVER_HOST: 0.0.0.0
+          CHROMA_SERVER_HTTP_PORT: 8000
+          ANONYMIZED_TELEMETRY: FALSE
+        options: >-
+          --health-cmd "curl -f http://localhost:8000/api/v2/heartbeat || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 30s
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y curl gcc g++ build-essential
+        
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-asyncio httpx pytest-mock
+        
+    - name: Wait for ChromaDB
+      run: |
+        timeout 120 bash -c 'until curl -f http://localhost:8000/api/v2/heartbeat; do echo "Waiting for ChromaDB..."; sleep 5; done'
+        
+    - name: Run tests
+      env:
+        CHROMA_HOST: localhost
+        CHROMA_PORT: 8000
+        PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}
+        USE_TIKTOKEN: false
+        MIN_TOKENS: 300
+        MAX_TOKENS: 500
+      run: |
+        mkdir -p docs chroma_data images logs
+        cd src
+        python -m pytest ../tests/ -v --tb=short --cov=. --cov-report=xml --cov-report=term
+        
+    - name: Upload coverage
+      if: matrix.python-version == '3.12'
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: false
+
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install linting tools
+      run: |
+        pip install flake8 black isort mypy
+        
+    - name: Run Black (format check)
+      run: |
+        black --check --diff src/ tests/
+        
+    - name: Run isort (import sort check)
+      run: |
+        isort --check-only --diff src/ tests/
+        
+    - name: Run flake8 (linting)
+      run: |
+        flake8 src/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 src/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+        
+    - name: Type check with mypy
+      run: |
+        mypy src/ --ignore-missing-imports --no-strict-optional

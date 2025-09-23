@@ -47,7 +47,7 @@ def _is_toc_page(page_text: str) -> bool:
     for line in lines[:15]:  # Check first 15 lines for TOC title
         line_lower = line.lower()
         if any(indicator in line_lower for indicator in [
-            'table of contents', 'mục lục',
+            'table of contents', 'mục lục'
         ]):
             toc_indicators += 1
 

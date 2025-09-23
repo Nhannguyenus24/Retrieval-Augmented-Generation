@@ -149,10 +149,7 @@ Thumbs.db
 
 # Project specific
 chroma_data/
-*.pdf
-*.docx
 
-*.md
 temp/
 output/
 logs/

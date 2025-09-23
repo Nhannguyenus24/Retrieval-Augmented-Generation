@@ -19,16 +19,15 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy source code
-COPY src/ ./src/
-COPY docs/ ./docs/
+COPY . .
 
 # Create directory for ChromaDB data
 RUN mkdir -p /app/chroma_data
 
 # Set environment variables
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app/src:/app
 ENV ANONYMIZED_TELEMETRY=FALSE
-
+WORKDIR /app/src
 # Expose port
 EXPOSE 1234
 
@@ -37,4 +36,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:1234/health || exit 1
 
 # Run the application
-CMD ["python", "src/main.py"]
+CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "1234"]

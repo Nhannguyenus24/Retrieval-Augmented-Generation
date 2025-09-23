@@ -1,7 +1,9 @@
 from openai import OpenAI
 from utils.jinja_template import render_template
+import logging
 
 client = OpenAI()
+logging = logging.getLogger("openai")
 
 def one_shot(
     contents: str,
@@ -36,8 +38,6 @@ def one_shot(
     resp = client.chat.completions.create(**params)
 
     if hasattr(resp, "usage") and resp.usage:
-        print("Prompt tokens:", resp.usage.prompt_tokens)
-        print("Completion tokens:", resp.usage.completion_tokens)
-        print("Total tokens:", resp.usage.total_tokens)
+        logging.info("Total tokens: %d", resp.usage.total_tokens)
 
     return resp.choices[0].message.content

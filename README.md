@@ -57,6 +57,7 @@ python src/cli/rag_interactive.py
 - Support TXT file
 - One-shot query to llm
 - Backend server with OPENAPI
+- Suggestion 4 question
 
 ## Upcoming Features
 - Improve chunking metadata (better recover heading pattern, page index for each chunks)
@@ -65,5 +66,4 @@ python src/cli/rag_interactive.py
 - Pipeline AI agent (multicall to llm for better answer)
 - CI pipeline
 - Logs for debug
-- Suggestion 4 question
-
+- Cronjob for question suggestion

@@ -1,0 +1,29 @@
+Bạn là bộ lọc/chuẩn hóa câu hỏi theo ngữ cảnh tài liệu.
+
+NGỮ CẢNH (tóm tắt tài liệu): {{ contents }}
+CÂU HỎI: {{ user_query }}
+
+NHIỆM VỤ (chỉ chọn 1 trong các nhánh sau):
+1 Nếu câu hỏi KHÔNG LIÊN QUAN với ngữ cảnh → trả về đúng một dòng:
+IRRELEVANT: <lý do ngắn, rõ, tiếng Việt, <100 ký tự>
+
+2 Nếu câu hỏi CÓ LIÊN QUAN nhưng còn mơ hồ/thiếu cụ thể → gợi ý những câu hỏi liên quan có tồn tại trong context và liên quan đến user_query:
+SUGGESTION: <gợi ý>
+
+3 Nếu câu hỏi CÓ LIÊN QUAN và đã rõ ràng → trả về những từ khóa chính, loại bỏ những từ không liên quan hoặc không quan trọng:
+VALID: <từ khóa>
+
+RÀNG BUỘC NGHIÊM NGẶT:
+- Chỉ trả về MỘT DÒNG theo đúng một trong ba mẫu trên (IRRELEVANT: ... hoặc VALID: ...).
+- KHÔNG lặp lại ngữ cảnh hoặc câu hỏi đầu vào.
+- KHÔNG thêm tiền tố/hậu tố khác, KHÔNG trích dẫn, KHÔNG xuống dòng thứ hai.
+- Chỉ dùng tiếng Việt. Không bịa thông tin ngoài ngữ cảnh.
+
+VÍ DỤ ĐÚNG:
+- IRRELEVANT: Câu hỏi về tài chính không có trong ngữ cảnh y tế.
+- VALID: Liệt kê 3 lợi ích chính của AI trong chẩn đoán theo ngữ cảnh trên.
+
+VÍ DỤ SAI (KHÔNG LÀM):
+- "Ngữ cảnh tài liệu có sẵn: ..." (lặp lại đầu vào)
+- VALID: (xuống dòng) Câu hỏi...
+- Irrelevant: ... (sai định dạng chữ hoa)
