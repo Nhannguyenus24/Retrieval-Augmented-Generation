@@ -28,19 +28,76 @@ pip install -r requirements.txt
 docker-compose up -d
 ```
 
-4. **Add environment variable:**
-- Create .env file in root folder
-- Add GEMINI_API_KEY and OPENAI_API_KEY
+4. **Configure environment variables:**
+Create a `.env` file in the root folder with the following configuration:
+
 ```bash
-GEMINI_API_KEY: your_gemini_api_key
-OPENAI_API_KEY=your_openai_api_key
+# AI API Keys (Required)
+GEMINI_API_KEY=your_gemini_api_key_here
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Cloudinary Configuration (Required for image processing)
+CLOUDINARY_CLOUD_NAME=your_cloud_name
+CLOUDINARY_API_KEY=your_api_key
+CLOUDINARY_API_SECRET=your_api_secret
+
+# ChromaDB Configuration (Optional - defaults provided)
+CHROMA_HOST=chromadb
+CHROMA_PORT=8000
+COLLECTION_NAME=SOF_DOCUMENTATION
+EMBEDDING_MODEL=all-MiniLM-L6-v2
+
+# Chunking Configuration (Optional - defaults provided)
+MIN_TOKENS=300
+MAX_TOKENS=500
+USE_TIKTOKEN=false
+TAB_WIDTH=4
+INDENT_STEP=4
 ```
 
-5. **Run local**
+5. **Run locally:**
+```bash
 uvicorn --app-dir src main:app --reload --host 127.0.0.1 --port 1234
+```
+
 ## Usage
 
-**Run RAG Interactive CLI:**
+### **API Server:**
+Access the API documentation at: `http://127.0.0.1:1234/docs`
+
+**Available Endpoints:**
+- `GET /health` - Health check
+- `GET /chunks` - Process all files in docs folder
+- `POST /query` - Query documents with RAG
+- `GET /suggestions` - Get suggested questions
+- `DELETE /chunks` - Clear all chunks
+- `POST /process-file` - **NEW**: Process and store single file from docs folder with summary generation
+- `GET /list-files` - **NEW**: List all available files in docs folder
+- `DELETE /delete-file` - **NEW**: Delete all chunks for a specific file
+- `POST /get-file-chunks` - **NEW**: Get all chunks for a specific file
+
+**Single File Processing Example:**
+```bash
+# List available files
+curl http://127.0.0.1:1234/list-files
+
+# Process specific file
+curl -X POST http://127.0.0.1:1234/process-file \
+  -H "Content-Type: application/json" \
+  -d '{"filename": "your-document.pdf"}'
+
+# Get all chunks for specific file
+curl -X POST http://127.0.0.1:1234/get-file-chunks \
+  -H "Content-Type: application/json" \
+  -d '{"filename": "your-document.pdf"}'
+
+# Delete all chunks for specific file
+curl -X DELETE http://127.0.0.1:1234/delete-file \
+  -H "Content-Type: application/json" \
+  -d '{"filename": "your-document.pdf"}'
+```
+
+### **Interactive CLI:**
 ```bash
 python src/cli/rag_interactive.py
 ```
@@ -55,6 +112,7 @@ python src/cli/rag_interactive.py
 - Support Docx
 - Support Markdown file
 - Support TXT file
+- Support Excel files (.xlsx, .xls) with image extraction
 - One-shot query to llm
 - Backend server with OPENAPI
 - Suggestion 4 question

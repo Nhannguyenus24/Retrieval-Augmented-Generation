@@ -147,15 +147,12 @@ cython_debug/
 ehthumbs.db
 Thumbs.db
 
-# Project specific
-chroma_data/
 
 temp/
 output/
 logs/
 
-# ChromaDB data
-chroma_data/
+
 chromadb/
 
 # Model files

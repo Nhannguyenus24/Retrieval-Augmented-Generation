@@ -95,7 +95,9 @@ class TopKRetriever:
                     'page_range': page_range,
                     'token_count': metadata.get('token_count', 0),
                     'content': doc,
+                    'image_urls': metadata.get('image_urls', []),
                 }
+                print(metadata.get('image_urls', []), metadata.get('file_name'))
                 chunks.append(chunk)
             return chunks
             
@@ -161,6 +163,7 @@ class TopKRetriever:
                     'page_range': page_range,
                     'token_count': metadata.get('token_count', 0),
                     'content': doc,
+                     'image_urls': metadata.get('image_urls', []),
                 }
                 
                 neighbors.append(neighbor)

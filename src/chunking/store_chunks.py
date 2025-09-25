@@ -9,6 +9,7 @@ from ingestion.transform_pdf import pdf_to_chunks_smart_indent
 from ingestion.transform_txt import txt_to_chunks_smart_indent
 from ingestion.transform_md import md_to_chunks_smart_indent
 from ingestion.transform_docx import docx_to_chunks_smart_indent
+from ingestion.transform_excel import excel_to_chunks_smart_indent
 import logging
 
 logger = logging.getLogger("store_chunks")
@@ -87,6 +88,8 @@ class ChromaChunkStore:
                     chunks = md_to_chunks_smart_indent(file_path, min_tokens=min_tokens, max_tokens=max_tokens)
                 elif filename.endswith(".docx"):
                     chunks = docx_to_chunks_smart_indent(file_path, min_tokens=min_tokens, max_tokens=max_tokens)
+                elif filename.endswith((".xlsx", ".xls")):
+                    chunks = excel_to_chunks_smart_indent(file_path, min_tokens=min_tokens, max_tokens=max_tokens)
                 else:
                     print(f"Unsupported file type: {filename}")
                     continue
@@ -130,8 +133,8 @@ class ChromaChunkStore:
                         "chunk_index": chunk.get('chunk_index'),
                         "page_from": chunk.get('page_from'),
                         "page_to": chunk.get('page_to'),
-                        "breadcrumbs": json.dumps(chunk.get('breadcrumbs', [])) if chunk.get('breadcrumbs') else None,
-                        "document_summary": document_summary
+                        "document_summary": document_summary,
+                        "image_urls": json.dumps(chunk.get('image_urls', []), ensure_ascii=False)
                     }
                     
                     # Remove None values to keep metadata clean
@@ -147,6 +150,140 @@ class ChromaChunkStore:
             print(f"Error processing files in folder: {e}")
             return False
 
+    def store_chunks_from_single_file(self, file_path: str, min_tokens: int = 300, max_tokens: int = 500) -> Dict:
+        """
+        Process a single file into chunks and store in ChromaDB
+        Returns: dict with success status, message, and metadata
+        """
+        if not os.path.exists(file_path):
+            return {
+                "success": False,
+                "message": f"File not found: {file_path}",
+                "chunks_stored": 0,
+                "filename": os.path.basename(file_path),
+                "error": "File not found"
+            }
+        
+        filename = os.path.basename(file_path)
+        filename_lower = filename.lower()
+        
+        try:
+            # Determine file type and process accordingly
+            chunks = []
+            file_type = "unknown"
+            
+            if filename_lower.endswith(".pdf"):
+                file_type = "pdf"
+                chunks = pdf_to_chunks_smart_indent(file_path, min_tokens=min_tokens, max_tokens=max_tokens)
+            elif filename_lower.endswith(".txt"):
+                file_type = "txt"
+                chunks = txt_to_chunks_smart_indent(file_path, min_tokens=min_tokens, max_tokens=max_tokens)
+            elif filename_lower.endswith(".md"):
+                file_type = "markdown"
+                chunks = md_to_chunks_smart_indent(file_path, min_tokens=min_tokens, max_tokens=max_tokens)
+            elif filename_lower.endswith(".docx"):
+                file_type = "docx"
+                chunks = docx_to_chunks_smart_indent(file_path, min_tokens=min_tokens, max_tokens=max_tokens)
+            elif filename_lower.endswith((".xlsx", ".xls")):
+                file_type = "excel"
+                chunks = excel_to_chunks_smart_indent(file_path, min_tokens=min_tokens, max_tokens=max_tokens)
+            else:
+                return {
+                    "success": False,
+                    "message": f"Unsupported file type: {filename}",
+                    "chunks_stored": 0,
+                    "filename": filename,
+                    "file_type": file_type,
+                    "error": "Unsupported file type"
+                }
+                
+            if not chunks:
+                return {
+                    "success": False,
+                    "message": f"No valid chunks found for file: {filename}",
+                    "chunks_stored": 0,
+                    "filename": filename,
+                    "file_type": file_type,
+                    "error": "No chunks generated"
+                }
+
+            print(f"Created {len(chunks)} chunks from {filename}")
+            
+            # Generate summary for this document
+            try:
+                document_summary = self.get_summary(chunks)
+                print(f"Generated summary for {filename}: {document_summary[:100]}...")
+            except Exception as e:
+                print(f"Error generating summary for {filename}: {e}")
+                document_summary = "Summary generation failed."
+
+            # Prepare data for ChromaDB
+            documents = []
+            metadatas = []
+            ids = []
+
+            for chunk in chunks:
+                chunk_id = f"{chunk.get('file_name', filename)}_{chunk.get('chunk_id', f'chunk_{len(documents)+1}')}"
+                # Chunk content
+                documents.append(chunk['content'])
+
+                page_from = str(chunk.get('page_from', 'Unknown'))
+                page_to   = str(chunk.get('page_to', 'Unknown'))
+                page_range = page_from if page_from == page_to else f"{page_from}-{page_to}"
+
+                # Enhanced metadata with breadcrumbs and new fields
+                metadata = {
+                    "file_name": chunk.get('file_name', filename),
+                    "chunk_id": chunk.get('chunk_id', f'chunk_{len(documents)}'),
+                    "page_range": page_range,
+                    "indent_levels": json.dumps(chunk.get('indent_levels', [])),
+                    "token_count": int(chunk.get('token_est', chunk.get('token_count', 0))),  # Ensure integer
+                    "source_path": os.path.abspath(file_path),
+                    "doc_id": chunk.get('doc_id', filename_lower.split('.')[0]),
+                    "source": chunk.get('source', filename),
+                    "section_title": chunk.get('section_title'),
+                    "heading_path": chunk.get('heading_path'),
+                    "chunk_index": chunk.get('chunk_index'),
+                    "page_from": chunk.get('page_from'),
+                    "page_to": chunk.get('page_to'),
+                    "document_summary": document_summary,
+                    "image_urls": json.dumps(chunk.get('image_urls', []), ensure_ascii=False),
+                    "file_type": file_type
+                }
+                
+                # Remove None values to keep metadata clean
+                metadata = {k: v for k, v in metadata.items() if v is not None}
+                metadatas.append(metadata)
+                ids.append(chunk_id)
+
+            # Store in ChromaDB
+            self.collection.add(documents=documents, metadatas=metadatas, ids=ids)
+            print(f"Added {len(documents)} documents to collection from {filename}")
+            
+            return {
+                "success": True,
+                "message": f"Successfully processed and stored {filename}",
+                "chunks_stored": len(chunks),
+                "filename": filename,
+                "file_type": file_type,
+                "file_path": file_path,
+                "document_summary": document_summary,
+                "total_tokens": int(sum(chunk.get('token_est', chunk.get('token_count', 0)) for chunk in chunks)),  # Ensure integer
+                "has_images": any(chunk.get('image_urls', []) for chunk in chunks),
+                "image_count": sum(len(chunk.get('image_urls', [])) for chunk in chunks)
+            }
+            
+        except Exception as e:
+            print(f"Error processing file {filename}: {e}")
+            return {
+                "success": False,
+                "message": f"Error processing file: {filename}",
+                "chunks_stored": 0,
+                "filename": filename,
+                "file_type": file_type,
+                "error": str(e)
+            }
+
     def clear_collection(self) -> bool:
         """Delete all documents in collection"""
         try:
@@ -161,6 +298,102 @@ class ChromaChunkStore:
         except Exception as e:
             print(f"Error clearing collection: {e}")
             return False
+
+    def get_file_chunks(self, filename: str) -> Dict:
+        """
+        Get all chunks and metadata for a specific file
+        Returns: dict with success status, message, and chunks data
+        """
+        try:
+            # Query all chunks for this file
+            results = self.collection.get(
+                where={"file_name": filename}
+            )
+            
+            if not results['ids']:
+                return {
+                    "success": False,
+                    "message": f"No chunks found for file: {filename}",
+                    "chunk_count": 0,
+                    "filename": filename,
+                    "chunks": [],
+                    "error": "File not found in collection"
+                }
+            
+            # Format chunk data for response
+            chunks = []
+            for i, chunk_id in enumerate(results['ids']):
+                chunk_data = {
+                    "id": chunk_id,
+                    "content": results['documents'][i] if results['documents'] and i < len(results['documents']) else "",
+                    "metadata": results['metadatas'][i] if results['metadatas'] and i < len(results['metadatas']) else {}
+                }
+                chunks.append(chunk_data)
+            
+            print(f"Retrieved {len(chunks)} chunks for file: {filename}")
+            
+            return {
+                "success": True,
+                "message": f"Successfully retrieved chunks for {filename}",
+                "chunk_count": len(chunks),
+                "filename": filename,
+                "chunks": chunks
+            }
+            
+        except Exception as e:
+            print(f"Error getting file chunks for {filename}: {e}")
+            return {
+                "success": False,
+                "message": f"Error retrieving chunks for {filename}",
+                "chunk_count": 0,
+                "filename": filename,
+                "chunks": [],
+                "error": str(e)
+            }
+
+    def delete_file_chunks(self, filename: str) -> Dict:
+        """
+        Delete all chunks and metadata for a specific file
+        Returns: dict with success status, message, and deleted count
+        """
+        try:
+            # Query all chunks for this file
+            results = self.collection.get(
+                where={"file_name": filename}
+            )
+            
+            if not results['ids']:
+                return {
+                    "success": False,
+                    "message": f"No chunks found for file: {filename}",
+                    "deleted_count": 0,
+                    "filename": filename,
+                    "error": "File not found in collection"
+                }
+            
+            # Delete all chunks for this file
+            deleted_count = len(results['ids'])
+            self.collection.delete(ids=results['ids'])
+            
+            print(f"Deleted {deleted_count} chunks for file: {filename}")
+            
+            return {
+                "success": True,
+                "message": f"Successfully deleted all chunks for {filename}",
+                "deleted_count": deleted_count,
+                "filename": filename,
+                "chunk_ids": results['ids']
+            }
+            
+        except Exception as e:
+            print(f"Error deleting file chunks for {filename}: {e}")
+            return {
+                "success": False,
+                "message": f"Error deleting chunks for {filename}",
+                "deleted_count": 0,
+                "filename": filename,
+                "error": str(e)
+            }
 
     def get_collection_stats(self) -> Dict:
         """Get collection statistics"""
