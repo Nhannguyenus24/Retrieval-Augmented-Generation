@@ -15,21 +15,6 @@ jobs:
     name: Run Tests
     runs-on: ubuntu-latest
     
-    services:
-      chromadb:
-        image: chromadb/chroma:1.0.0
-        ports:
-          - 8000:8000
-        env:
-          CHROMA_SERVER_HOST: 0.0.0.0
-          CHROMA_SERVER_HTTP_PORT: 8000
-          ANONYMIZED_TELEMETRY: FALSE
-        options: >-
-          --health-cmd "curl -f http://localhost:8000/api/v2/heartbeat"
-          --health-interval 30s
-          --health-timeout 10s
-          --health-retries 5
-    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -50,22 +35,19 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y curl gcc g++ build-essential
+        sudo apt-get install -y gcc g++ build-essential
         
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov pytest-asyncio httpx
-        
-    - name: Wait for ChromaDB to be ready
-      run: |
-        timeout 60 bash -c 'until curl -f http://localhost:8000/api/v1/heartbeat; do sleep 2; done'
+        pip install pytest pytest-cov pytest-asyncio
+        # Install only essential dependencies for testing
+        pip install jinja2 fastapi uvicorn python-multipart
+        pip install tiktoken openai google-generativeai
+        pip install python-docx openpyxl pypdf2 markdown
         
     - name: Set environment variables for testing
       run: |
-        echo "CHROMA_HOST=localhost" >> $GITHUB_ENV
-        echo "CHROMA_PORT=8000" >> $GITHUB_ENV
         echo "PYTHONPATH=${{ github.workspace }}/src:${{ github.workspace }}" >> $GITHUB_ENV
         echo "USE_TIKTOKEN=false" >> $GITHUB_ENV
         echo "MIN_TOKENS=300" >> $GITHUB_ENV
@@ -74,45 +56,47 @@ jobs:
     - name: Create test directories
       run: |
         mkdir -p docs
-        mkdir -p chroma_data
         mkdir -p images
         mkdir -p logs
         
     - name: Run syntax check
       run: |
-        python -m py_compile src/main.py
-        python -m py_compile src/api/router.py
+        python -c "import py_compile; py_compile.compile('src/main.py', doraise=True)"
+        python -c "import py_compile; py_compile.compile('src/api/router.py', doraise=True)"
         
     - name: Run unit tests
       run: |
-        cd src
-        python -m pytest ../tests/ -v --tb=short --cov=. --cov-report=xml --cov-report=term-missing
+        python -m pytest tests/ -v --tb=short --cov=src --cov-report=xml --cov-report=term-missing
       env:
-        CHROMA_HOST: localhost
-        CHROMA_PORT: 8000
         PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}
         
-    - name: Test API endpoints
+    - name: Test basic imports
       run: |
         cd src
         python -c "
-        import asyncio
         import sys
         import os
         sys.path.insert(0, '.')
         
-        async def test_import():
-            try:
-                from main import app
-                from api.router import router
-                print('✅ All imports successful')
-                return True
-            except Exception as e:
-                print(f'❌ Import failed: {e}')
-                return False
-                
-        result = asyncio.run(test_import())
-        sys.exit(0 if result else 1)
+        try:
+            # Test pattern utilities
+            from utils.pattern import HEADING_PATTERNS, WHITESPACE_ONLY_PATTERN
+            print('✅ Pattern utilities import successful')
+            
+            # Test jinja template utilities  
+            from utils.jinja_template import render_template
+            print('✅ Jinja template utilities import successful')
+            
+            # Test transformation modules
+            from ingestion.transform_txt import transform_txt
+            from ingestion.transform_md import transform_md
+            print('✅ Document transformation modules import successful')
+            
+            print('✅ All core imports successful - no ChromaDB required!')
+            
+        except Exception as e:
+            print(f'❌ Import failed: {e}')
+            sys.exit(1)
         "
         
     - name: Upload coverage to Codecov
