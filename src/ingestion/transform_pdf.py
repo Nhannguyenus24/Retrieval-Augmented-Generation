@@ -854,3 +854,5 @@ def get_chunk_images_info(chunks: List[Dict]) -> Dict:
                     })
     
     return image_summary
+
+
