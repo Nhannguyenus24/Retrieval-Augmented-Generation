@@ -163,3 +163,7 @@ models/
 # Temporary files
 *.tmp
 *.temp
+
+chroma_data/
+
+images/

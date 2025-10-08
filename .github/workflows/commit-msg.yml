@@ -1,0 +1,44 @@
+name: Commit Message Check
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  commit-format-check:
+    name: Validate Commit Message Format
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Validate commit message
+        run: |
+          # Get the latest commit message
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+          echo "🔍 Checking commit message: $COMMIT_MSG"
+
+          # Conventional Commit pattern: type(scope): description
+          PATTERN="^(feat|fix|docs|style|refactor|test|chore|ci|build|perf)(\([a-zA-Z0-9_-]+\))?: .+$"
+
+          if echo "$COMMIT_MSG" | grep -qE "$PATTERN"; then
+            echo "✅ Commit message follows the Conventional Commit format."
+            echo "Format: <type>(scope): description"
+            echo "Example: feat(api): add transaction endpoint"
+          else
+            echo "❌ Invalid commit message format!"
+            echo "Expected format: <type>(scope): description"
+            echo "Allowed types: feat, fix, docs, style, refactor, test, chore, ci, build, perf"
+            echo ""
+            echo "Examples of valid messages:"
+            echo "  feat(payment): add retry mechanism"
+            echo "  fix(auth): resolve login issue"
+            echo "  docs(readme): update installation guide"
+            echo "  test(utils): add validation tests"
+            exit 1
+          fi
